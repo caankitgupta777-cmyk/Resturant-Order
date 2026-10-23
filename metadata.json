@@ -1,0 +1,6 @@
+{
+  "name": "Varhad Rasoi - Amravati Dining & KDS",
+  "description": "Real-time restaurant table ordering, Kitchen Display System (KDS), split-bill payments, automated email invoicing, inventory guard, and table booking in Amravati.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
