@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useRestaurant } from '../../context/RestaurantContext';
+import { useRestaurant, canOrderBeBilled } from '../../context/RestaurantContext';
 import { RestaurantTable, TableSection, TableBooking } from '../../types/restaurant';
 import {
   LayoutGrid,
@@ -17,9 +17,16 @@ import {
   RefreshCw,
   Utensils,
   Maximize2,
+  Lock,
+  Receipt,
+  FileText,
 } from 'lucide-react';
 
-export const TableManagementView: React.FC = () => {
+interface TableManagementViewProps {
+  onOpenSplitBill?: (orderId: string) => void;
+}
+
+export const TableManagementView: React.FC<TableManagementViewProps> = ({ onOpenSplitBill }) => {
   const {
     tables,
     bookings,
@@ -30,6 +37,7 @@ export const TableManagementView: React.FC = () => {
     customerTableNumber,
     setCustomerTableNumber,
     setCurrentView,
+    orders,
   } = useRestaurant();
 
   const [activeTab, setActiveTab] = useState<'floor' | 'booking' | 'reservations'>('floor');
@@ -327,17 +335,54 @@ export const TableManagementView: React.FC = () => {
                     </button>
                   )}
 
-                  {tbl.status === 'occupied' && (
-                    <button
-                      onClick={() => updateTableStatus(tbl.id, 'billing')}
-                      className="px-2 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition"
-                      title="Request Bill"
-                    >
-                      Bill
-                    </button>
-                  )}
+                  {tbl.status === 'occupied' && (() => {
+                    const activeTblOrder = orders.find(o => o.tableNumber === tbl.number && o.status !== 'completed' && o.status !== 'cancelled');
+                    const canBill = activeTblOrder ? canOrderBeBilled(activeTblOrder) : true;
+                    return canBill ? (
+                      <button
+                        onClick={() => updateTableStatus(tbl.id, 'billing')}
+                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition"
+                        title="Move table to billing stage"
+                      >
+                        Bill
+                      </button>
+                    ) : (
+                      <span
+                        className="px-2 py-1.5 rounded-lg bg-neutral-800 text-neutral-500 text-[11px] font-medium flex items-center gap-1 cursor-not-allowed border border-neutral-700/60"
+                        title="Billing blocked: Food is currently being prepared in kitchen"
+                      >
+                        <Lock className="w-3 h-3 text-amber-500" />
+                        <span>Cooking</span>
+                      </span>
+                    );
+                  })()}
 
-                  {(tbl.status === 'billing' || tbl.status === 'reserved') && (
+                  {tbl.status === 'billing' && (() => {
+                    const activeTblOrder = orders.find(o => o.tableNumber === tbl.number && o.status !== 'completed' && o.status !== 'cancelled');
+                    return (
+                      <div className="flex items-center gap-1">
+                        {activeTblOrder && onOpenSplitBill && (
+                          <button
+                            onClick={() => onOpenSplitBill(activeTblOrder.id)}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1"
+                            title="Settle bill or view invoice"
+                          >
+                            <Receipt className="w-3 h-3" />
+                            <span>Settle</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => updateTableStatus(tbl.id, 'available')}
+                          className="px-2 py-1.5 rounded-lg bg-neutral-750 hover:bg-neutral-700 text-neutral-300 text-xs font-medium transition"
+                          title="Free table"
+                        >
+                          Free
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {tbl.status === 'reserved' && (
                     <button
                       onClick={() => updateTableStatus(tbl.id, 'available')}
                       className="px-2 py-1.5 rounded-lg bg-neutral-750 hover:bg-neutral-700 text-neutral-300 text-xs font-medium transition"

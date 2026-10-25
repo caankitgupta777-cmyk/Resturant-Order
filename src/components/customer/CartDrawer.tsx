@@ -6,9 +6,7 @@ import {
   Plus,
   Minus,
   ChefHat,
-  Clock,
   WifiOff,
-  Sparkles,
   AlertCircle,
   Mail,
   User,
@@ -35,6 +33,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     customerTableNumber,
     placeOrder,
     isOnline,
+    restaurantSettings,
   } = useRestaurant();
 
   const [customerName, setCustomerName] = useState('Ankit Gupta');
@@ -45,9 +44,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   if (!isOpen) return null;
 
-  const cgst = Number((cartTotal * 0.025).toFixed(2));
-  const sgst = Number((cartTotal * 0.025).toFixed(2));
-  const grandTotal = Math.round(cartTotal + cgst + sgst);
+  const cgst = Number(((cartTotal * restaurantSettings.cgstRate) / 100).toFixed(2));
+  const sgst = Number(((cartTotal * restaurantSettings.sgstRate) / 100).toFixed(2));
+  const serviceCharge = restaurantSettings.serviceChargeRate > 0
+    ? Number(((cartTotal * restaurantSettings.serviceChargeRate) / 100).toFixed(2))
+    : 0;
+  const grandTotal = Math.round(cartTotal + cgst + sgst + serviceCharge);
 
   const handlePlaceOrder = async () => {
     if (cart.length === 0) return;
@@ -128,7 +130,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               <ChefHat className="w-12 h-12 mx-auto stroke-1 text-neutral-600" />
               <p className="text-sm font-medium text-neutral-300">Your order tray is empty</p>
               <p className="text-xs text-neutral-500">
-                Browse our Amravati signature dishes to start your meal.
+                Select items from the menu to build your table order.
               </p>
             </div>
           ) : (
@@ -145,8 +147,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <p className="text-[11px] text-amber-400/90 font-serif">
                       {cartItem.item.localName}
                     </p>
-                    <p className="text-xs font-bold text-neutral-300">
-                      ₹{cartItem.item.price} each &bull; <span className="text-white">₹{cartItem.item.price * cartItem.quantity}</span>
+                    <p className="text-xs font-bold text-neutral-300 font-mono">
+                      {restaurantSettings.currencySymbol}{cartItem.item.price} &bull; <span className="text-white">{restaurantSettings.currencySymbol}{cartItem.item.price * cartItem.quantity}</span>
                     </p>
                   </div>
 
@@ -186,7 +188,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {cart.length > 0 && (
             <div className="pt-3 border-t border-neutral-800 space-y-3">
               <h4 className="text-xs font-bold text-neutral-300 uppercase tracking-wider">
-                Guest & Chef Instructions
+                Guest &amp; Kitchen Instructions
               </h4>
 
               <div className="grid grid-cols-2 gap-2">
@@ -205,13 +207,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                 <div>
                   <label className="text-[10px] text-neutral-400 flex items-center gap-1 mb-1">
-                    <Mail className="w-2.5 h-2.5" /> Email (Invoice)
+                    <Mail className="w-2.5 h-2.5" /> Email (Receipt record)
                   </label>
                   <input
                     type="email"
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="Email for automated invoice"
+                    placeholder="guest@example.com"
                     className="w-full px-2.5 py-1.5 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500/50"
                   />
                 </div>
@@ -219,7 +221,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               <div>
                 <label className="text-[10px] text-neutral-400 block mb-1">
-                  Special Cooking Instructions for Chef (e.g. less oil, extra thecha)
+                  Special Cooking Instructions for Kitchen Line
                 </label>
                 <textarea
                   value={orderNotes}
@@ -239,19 +241,25 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             <div className="space-y-1.5 text-xs text-neutral-400">
               <div className="flex justify-between">
                 <span>Items Subtotal ({cartCount})</span>
-                <span className="text-white">₹{cartTotal}</span>
+                <span className="text-white font-mono">{restaurantSettings.currencySymbol}{cartTotal}</span>
               </div>
               <div className="flex justify-between text-[11px]">
-                <span>CGST (2.5%)</span>
-                <span>₹{cgst.toFixed(2)}</span>
+                <span>CGST ({restaurantSettings.cgstRate}%)</span>
+                <span className="font-mono">{restaurantSettings.currencySymbol}{cgst.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-[11px]">
-                <span>SGST (2.5%)</span>
-                <span>₹{sgst.toFixed(2)}</span>
+                <span>SGST ({restaurantSettings.sgstRate}%)</span>
+                <span className="font-mono">{restaurantSettings.currencySymbol}{sgst.toFixed(2)}</span>
               </div>
+              {serviceCharge > 0 && (
+                <div className="flex justify-between text-[11px]">
+                  <span>Service Charge ({restaurantSettings.serviceChargeRate}%)</span>
+                  <span className="font-mono">{restaurantSettings.currencySymbol}{serviceCharge.toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm font-black text-white pt-1 border-t border-neutral-800">
                 <span>Estimated Total</span>
-                <span className="text-amber-400 text-base">₹{grandTotal}</span>
+                <span className="text-amber-400 text-base font-mono">{restaurantSettings.currencySymbol}{grandTotal}</span>
               </div>
             </div>
 

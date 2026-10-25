@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useRestaurant } from '../../context/RestaurantContext';
+import { useRestaurant, canOrderBeBilled } from '../../context/RestaurantContext';
 import { MenuItem } from '../../types/restaurant';
 import {
   Flame,
@@ -17,13 +17,16 @@ import {
   HelpCircle,
   Receipt,
   CheckCircle2,
+  Lock,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface CustomerViewProps {
   onOpenSplitBill: (orderId: string) => void;
+  onVoidOrder?: (orderId: string) => void;
 }
 
-export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) => {
+export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill, onVoidOrder }) => {
   const {
     menu,
     inventory,
@@ -34,6 +37,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
     updateCartQuantity,
     orders,
     callWaiter,
+    restaurantSettings,
   } = useRestaurant();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -83,9 +87,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
   return (
     <div className="space-y-6 pb-20">
       {/* Table Greeting & Quick Service Ribbon */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        
+      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -97,10 +99,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white font-['Outfit'] tracking-tight">
-              Varhad Heritage Dining & Rasoi
+              {restaurantSettings.restaurantName}
             </h1>
-            <p className="text-xs sm:text-sm text-neutral-400 mt-1 max-w-xl">
-              Authentic Saoji & Varhadi culinary traditions of Amravati City. Orders are routed directly to our Kitchen Display System.
+            <p className="text-xs sm:text-sm text-neutral-400 mt-0.5">
+              {restaurantSettings.tagline} &bull; Real-time order taking for servers & guests
             </p>
           </div>
 
@@ -114,20 +116,31 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
               <span>Call Server</span>
             </button>
 
+            {/* Requirement 2: Enable billing ONLY at appropriate stage */}
             {activeOrder && (
-              <button
-                onClick={() => onOpenSplitBill(activeOrder.id)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-950/40 transition"
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                <span>Split Bill & Pay</span>
-              </button>
+              canOrderBeBilled(activeOrder) ? (
+                <button
+                  onClick={() => onOpenSplitBill(activeOrder.id)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-950/40 transition"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Pay & Settle Bill</span>
+                </button>
+              ) : (
+                <div
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-800/80 border border-neutral-700/80 text-neutral-400 text-xs font-medium cursor-not-allowed"
+                  title="Billing unlocks once food has been prepared and served to your table"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Billing Locked (In Kitchen)</span>
+                </div>
+              )
             )}
           </div>
         </div>
       </div>
 
-      {/* Active Order Live Tracker (if there's an ongoing order for this table) */}
+      {/* Active Order Live Tracker */}
       {activeOrder && (
         <div className="bg-neutral-900/90 border border-amber-500/30 rounded-2xl p-4 sm:p-5 shadow-lg relative">
           <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
@@ -160,9 +173,9 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
           <div className="mt-4 grid grid-cols-4 gap-2 text-center">
             {[
               { key: 'received', label: 'Received in KDS', desc: 'Order confirmed' },
-              { key: 'in_kitchen', label: 'Chef Preparing', desc: 'Spices blending' },
-              { key: 'ready', label: 'Plated & Ready', desc: 'Hot on counter' },
-              { key: 'served', label: 'Served', desc: 'Enjoy your meal' },
+              { key: 'in_kitchen', label: 'Chef Preparing', desc: 'On cooking station' },
+              { key: 'ready', label: 'Plated & Ready', desc: 'Ready for server' },
+              { key: 'served', label: 'Served', desc: 'Ready for billing' },
             ].map((step, idx) => {
               const statusOrder = ['received', 'in_kitchen', 'ready', 'served', 'billed', 'completed'];
               const currentIdx = statusOrder.indexOf(activeOrder.status);
@@ -189,14 +202,26 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
             })}
           </div>
 
-          {/* Quick item peek */}
           <div className="mt-3 pt-3 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400">
             <span className="truncate max-w-md">
-              Dishes: {activeOrder.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
+              Items: {activeOrder.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
             </span>
-            <span className="font-semibold text-neutral-200">
-              Total: ₹{activeOrder.totalAmount}
-            </span>
+            <div className="flex items-center gap-3">
+              {onVoidOrder && activeOrder.status !== 'completed' && activeOrder.status !== 'cancelled' && (
+                <button
+                  type="button"
+                  onClick={() => onVoidOrder(activeOrder.id)}
+                  className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 cursor-pointer transition"
+                  title="Void Order (Manager PIN Required)"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>Void Order (Manager)</span>
+                </button>
+              )}
+              <span className="font-semibold text-neutral-200">
+                Total: {restaurantSettings.currencySymbol}{activeOrder.totalAmount}
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -204,7 +229,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
       {/* Filter and Search Bar */}
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Search box */}
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
@@ -224,7 +248,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
             )}
           </div>
 
-          {/* Veg Only filter toggle */}
           <label className="flex items-center gap-2 cursor-pointer bg-neutral-900 border border-neutral-800 px-3 py-2 rounded-xl text-xs font-semibold text-neutral-300 select-none">
             <input
               type="checkbox"
@@ -255,8 +278,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
         </div>
       </div>
 
-      {/* Menu Dishes Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Menu Dishes Grid - MINIMAL DESIGN WITHOUT PHOTOS OF DISH */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {filteredDishes.map(dish => {
           const invItem = inventory.find(i => i.id === dish.inventoryItemId);
           const isOutOfStock = invItem ? invItem.inStock <= 0 : false;
@@ -267,101 +290,87 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ onOpenSplitBill }) =
           return (
             <div
               key={dish.id}
-              className={`rounded-2xl border transition-all duration-200 overflow-hidden flex flex-col justify-between ${
+              className={`rounded-2xl border p-4 flex flex-col justify-between transition-all duration-150 ${
                 isOutOfStock
-                  ? 'bg-neutral-900/40 border-neutral-800/60 opacity-65'
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 shadow-lg hover:shadow-xl'
+                  ? 'bg-neutral-900/40 border-neutral-800/50 opacity-60'
+                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 shadow-sm hover:shadow-md'
               }`}
             >
-              <div>
-                {/* Dish Image Banner */}
-                <div className="relative h-44 w-full overflow-hidden bg-neutral-950">
-                  <img
-                    src={dish.image}
-                    alt={dish.name}
-                    className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
-                    loading="lazy"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/20 to-transparent" />
-
-                  {/* Veg / Non-Veg badge */}
-                  <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                    <span className={`w-5 h-5 rounded border bg-neutral-950/90 flex items-center justify-center ${
+              {/* Header Badges */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {/* Veg/Non-Veg dot */}
+                    <span className={`w-4 h-4 rounded border bg-neutral-950 flex items-center justify-center shrink-0 ${
                       dish.isVeg ? 'border-emerald-500 text-emerald-500' : 'border-red-500 text-red-500'
                     }`}>
-                      <span className={`w-2 h-2 rounded-full ${dish.isVeg ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full ${dish.isVeg ? 'bg-emerald-500' : 'bg-red-500'}`} />
                     </span>
 
                     {dish.isAmravatiSpecial && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-neutral-950 shadow-md flex items-center gap-1">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
                         <Sparkles className="w-2.5 h-2.5" />
                         Amravati Special
                       </span>
                     )}
                   </div>
 
-                  {/* Spice indicator */}
-                  {dish.spiceLevel && dish.spiceLevel > 0 && (
-                    <div className="absolute top-2.5 right-2.5 bg-neutral-950/80 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] text-red-400 font-semibold border border-red-500/20 flex items-center gap-0.5">
-                      <Flame className="w-3 h-3 text-red-500 fill-red-500" />
-                      <span>{dish.spiceLevel === 3 ? 'Saoji Fire' : 'Zanzanit'}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {dish.spiceLevel && dish.spiceLevel > 0 && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] text-red-400 font-semibold bg-red-950/40 border border-red-500/20 flex items-center gap-0.5">
+                        <Flame className="w-2.5 h-2.5 text-red-500 fill-red-500" />
+                        <span>{dish.spiceLevel === 3 ? 'Saoji Fire' : 'Medium'}</span>
+                      </span>
+                    )}
 
-                  {/* Stock Alert Badge */}
-                  {isOutOfStock ? (
-                    <div className="absolute bottom-2 left-2.5 bg-red-600/90 text-white text-[11px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" />
-                      Sold Out in Kitchen
-                    </div>
-                  ) : isLowStock ? (
-                    <div className="absolute bottom-2 left-2.5 bg-amber-600/90 text-neutral-950 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      Only {invItem?.inStock} {invItem?.localUnit} left!
-                    </div>
-                  ) : null}
-                </div>
-
-                {/* Dish Info */}
-                <div className="p-4 space-y-2">
-                  <div>
-                    <h3 className="font-bold text-neutral-100 text-base leading-snug font-['Outfit']">
-                      {dish.name}
-                    </h3>
-                    <p className="text-xs text-amber-400 font-medium font-serif mt-0.5">
-                      {dish.localName}
-                    </p>
-                  </div>
-
-                  <p className="text-xs text-neutral-400 line-clamp-2 leading-relaxed">
-                    {dish.description}
-                  </p>
-
-                  <div className="flex items-center gap-3 text-[11px] text-neutral-400 pt-1">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-amber-400" />
-                      {dish.prepTimeMinutes} mins
+                    <span className="text-[11px] text-neutral-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-neutral-500" />
+                      {dish.prepTimeMinutes}m
                     </span>
-                    <span>&bull;</span>
-                    <span className="text-neutral-400">{dish.station}</span>
                   </div>
                 </div>
+
+                {/* Dish Titles & Description */}
+                <div>
+                  <h3 className="font-bold text-neutral-100 text-base leading-snug font-['Outfit']">
+                    {dish.name}
+                  </h3>
+                  <p className="text-xs text-amber-400 font-medium font-serif mt-0.5">
+                    {dish.localName}
+                  </p>
+                </div>
+
+                <p className="text-xs text-neutral-400 line-clamp-2 leading-relaxed">
+                  {dish.description}
+                </p>
+
+                {/* Stock Alert Badge */}
+                {isOutOfStock ? (
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-red-950/60 text-red-400 border border-red-800">
+                    <AlertTriangle className="w-3 h-3" />
+                    Sold Out in Kitchen
+                  </div>
+                ) : isLowStock ? (
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/50 text-amber-300 border border-amber-700">
+                    <Clock className="w-3 h-3" />
+                    Low stock ({invItem?.inStock} {invItem?.localUnit} left)
+                  </div>
+                ) : null}
               </div>
 
-              {/* Card Footer: Price & Add to Cart */}
-              <div className="p-4 pt-0 border-t border-neutral-800/80 flex items-center justify-between mt-2">
+              {/* Price & Quantity Controls */}
+              <div className="mt-4 pt-3 border-t border-neutral-800/80 flex items-center justify-between">
                 <div>
-                  <span className="text-xs text-neutral-400">Price</span>
-                  <div className="text-lg font-black text-white">
-                    ₹{dish.price}
+                  <span className="text-[10px] text-neutral-400 block uppercase tracking-wider">Price</span>
+                  <div className="text-base font-black text-white font-mono">
+                    {restaurantSettings.currencySymbol}{dish.price}
                   </div>
                 </div>
 
-                {/* Cart Control or Out of Stock */}
                 {isOutOfStock ? (
                   <button
                     disabled
-                    className="px-3.5 py-1.5 bg-neutral-800 text-neutral-500 rounded-xl text-xs font-semibold cursor-not-allowed border border-neutral-700/50"
+                    className="px-3 py-1.5 bg-neutral-800 text-neutral-500 rounded-xl text-xs font-semibold cursor-not-allowed border border-neutral-700/50"
                   >
                     Unavailable
                   </button>

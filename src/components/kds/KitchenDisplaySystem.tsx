@@ -17,9 +17,14 @@ import {
   RefreshCw,
   Sparkles,
   Layers,
+  ShieldAlert,
 } from 'lucide-react';
 
-export const KitchenDisplaySystem: React.FC = () => {
+interface KitchenDisplaySystemProps {
+  onVoidOrder?: (orderId: string) => void;
+}
+
+export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({ onVoidOrder }) => {
   const {
     orders,
     updateOrderStatus,
@@ -370,6 +375,18 @@ export const KitchenDisplaySystem: React.FC = () => {
                       >
                         <RefreshCw className="w-3 h-3" />
                         <span>Recall</span>
+                      </button>
+                    )}
+
+                    {onVoidOrder && order.status !== 'completed' && order.status !== 'cancelled' && (
+                      <button
+                        type="button"
+                        onClick={() => onVoidOrder(order.id)}
+                        className="px-2 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 hover:text-white transition flex items-center gap-1 cursor-pointer"
+                        title="Void Order (Manager PIN Required)"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span className="text-[10px] font-bold">Void</span>
                       </button>
                     )}
                   </div>

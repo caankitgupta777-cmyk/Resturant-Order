@@ -10,9 +10,30 @@ import {
   WaiterCall,
   PushNotificationMessage,
   SplitPaymentInfo,
+  RestaurantSettings,
+  FirebaseConfigData,
+  StaffRole,
+  StaffUser,
+  AuditLog,
+  RegisterShift,
+  RestaurantTenant,
+  ThermalPrinterConfig,
+  SubscriptionLicense,
 } from '../types/restaurant';
-import { AMRAVATI_MENU, INITIAL_INVENTORY, INITIAL_TABLES, INITIAL_SAMPLE_ORDERS } from '../data/amravatiMenu';
+import {
+  AMRAVATI_MENU,
+  INITIAL_INVENTORY,
+  INITIAL_TABLES,
+  INITIAL_SAMPLE_ORDERS,
+  DEFAULT_RESTAURANT_SETTINGS,
+  INITIAL_STAFF_USERS,
+  INITIAL_REGISTER_SHIFT,
+  INITIAL_TENANTS,
+  DEFAULT_PRINTER_CONFIG,
+  DEFAULT_SUBSCRIPTION,
+} from '../data/amravatiMenu';
 import { soundEffects } from '../utils/audio';
+import { firebaseSyncService } from '../services/firebaseSync';
 
 export type AppView = 'customer' | 'kds' | 'tables' | 'inventory' | 'analytics';
 
@@ -22,6 +43,10 @@ interface CartItem {
   notes?: string;
 }
 
+export const canOrderBeBilled = (order: Order): boolean => {
+  return order.status === 'served' || order.status === 'ready' || order.status === 'billed' || order.status === 'completed';
+};
+
 interface RestaurantContextType {
   // Navigation & View
   currentView: AppView;
@@ -29,8 +54,60 @@ interface RestaurantContextType {
   customerTableNumber: number;
   setCustomerTableNumber: (num: number) => void;
 
-  // Data
+  // Settings
+  restaurantSettings: RestaurantSettings;
+  updateRestaurantSettings: (newSettings: RestaurantSettings) => void;
+  isSettingsOpen: boolean;
+  setIsSettingsOpen: (open: boolean) => void;
+
+  // Phase 1: Security & Staff Roles with 4-Digit PIN Lock
+  staffUsers: StaffUser[];
+  currentStaff: StaffUser;
+  isScreenLocked: boolean;
+  setIsScreenLocked: (locked: boolean) => void;
+  loginWithPin: (pin: string) => { success: boolean; staff?: StaffUser; error?: string };
+  logoutStaff: () => void;
+  lockScreen: () => void;
+  unlockScreen: (pin: string) => boolean;
+  switchStaffRole: (role: StaffRole) => void;
+  updateStaffPin: (staffId: string, newPin: string) => boolean;
+  isRoleAllowed: (allowedRoles: StaffRole[]) => boolean;
+
+  // Phase 2: Fraud Prevention, Audit Log & Order Void Authorization
+  auditLogs: AuditLog[];
+  addAuditLog: (action: AuditLog['action'], details: string, orderId?: string, amount?: number, reason?: string) => void;
+  voidOrderWithManagerApproval: (orderId: string, managerPin: string, reason: string) => { success: boolean; error?: string };
+  recordBillReprint: (orderId: string) => void;
+
+  // Phase 3: Shift Management, Cash Register & Day-End Z-Report
+  activeShift: RegisterShift | null;
+  shiftHistory: RegisterShift[];
+  openRegisterShift: (openingFloat: number, notes?: string) => RegisterShift;
+  closeRegisterShift: (actualCashCounted: number, notes?: string) => { shift: RegisterShift; discrepancy: number };
+
+  // Phase 4: Multi-Tenant Architecture
+  currentTenant: RestaurantTenant;
+  tenantsList: RestaurantTenant[];
+  switchTenant: (tenantId: string) => void;
+  createTenant: (tenantData: Omit<RestaurantTenant, 'createdAt'>) => RestaurantTenant;
+
+  // Phase 5: Hardware & Thermal Printer Config
+  printerConfig: ThermalPrinterConfig;
+  updatePrinterConfig: (config: ThermalPrinterConfig) => void;
+
+  // Phase 6: Commercial SaaS Subscription
+  subscription: SubscriptionLicense;
+  activateLicenseKey: (key: string) => { success: boolean; message: string };
+
+  // Cloud & Firebase Sync
+  isFirestoreConnected: boolean;
+  connectFirestore: (config: FirebaseConfigData) => boolean;
+  disconnectFirestore: () => void;
+
+  // Menu Data & Single-File Attachment
   menu: MenuItem[];
+  updateWholeMenu: (newMenu: MenuItem[]) => { success: boolean; count: number; error?: string };
+  resetMenuToDefault: () => void;
   inventory: InventoryItem[];
   tables: RestaurantTable[];
   orders: Order[];
@@ -58,6 +135,7 @@ interface RestaurantContextType {
   placeOrder: (customerName?: string, customerEmail?: string, notes?: string) => Promise<{ success: boolean; order?: Order; message?: string }>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   updateOrderItemStatus: (orderId: string, itemIdx: number, status: ItemStatus) => void;
+  processPayment: (orderId: string, paymentMethod: 'upi' | 'card' | 'cash' | 'netbanking', customerEmail?: string) => Promise<{ success: boolean; invoiceNumber: string }>;
   processSplitPayment: (orderId: string, splitInfo: SplitPaymentInfo, customerEmail: string) => Promise<{ success: boolean; invoiceNumber: string }>;
   
   // Table & Booking Operations
@@ -80,21 +158,154 @@ interface RestaurantContextType {
 
 const RestaurantContext = createContext<RestaurantContextType | null>(null);
 
-const STORAGE_KEY_ORDERS = 'varhad_amravati_orders_v2';
-const STORAGE_KEY_INVENTORY = 'varhad_amravati_inventory_v2';
-const STORAGE_KEY_TABLES = 'varhad_amravati_tables_v2';
-const STORAGE_KEY_BOOKINGS = 'varhad_amravati_bookings_v2';
-const STORAGE_KEY_OFFLINE_QUEUE = 'varhad_amravati_offline_queue_v2';
+const STORAGE_KEY_ORDERS = 'varhad_amravati_orders_v3';
+const STORAGE_KEY_INVENTORY = 'varhad_amravati_inventory_v3';
+const STORAGE_KEY_TABLES = 'varhad_amravati_tables_v3';
+const STORAGE_KEY_BOOKINGS = 'varhad_amravati_bookings_v3';
+const STORAGE_KEY_OFFLINE_QUEUE = 'varhad_amravati_offline_queue_v3';
+const STORAGE_KEY_SETTINGS = 'varhad_amravati_settings_v3';
+const STORAGE_KEY_MENU = 'varhad_amravati_menu_v3';
+const STORAGE_KEY_STAFF = 'varhad_amravati_staff_v3';
+const STORAGE_KEY_CURRENT_STAFF = 'varhad_amravati_current_staff_v3';
+const STORAGE_KEY_AUDIT = 'varhad_amravati_audit_v3';
+const STORAGE_KEY_SHIFT = 'varhad_amravati_shift_v3';
+const STORAGE_KEY_SHIFT_HIST = 'varhad_amravati_shift_hist_v3';
+const STORAGE_KEY_TENANTS = 'varhad_amravati_tenants_v3';
+const STORAGE_KEY_PRINTER = 'varhad_amravati_printer_v3';
+const STORAGE_KEY_SUBSCRIPTION = 'varhad_amravati_subscription_v3';
 
 export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentView, setCurrentView] = useState<AppView>('customer');
-  const [customerTableNumber, setCustomerTableNumber] = useState<number>(4); // Table 4 (AC Dining) default
-  const [menu] = useState<MenuItem[]>(AMRAVATI_MENU);
+  const [customerTableNumber, setCustomerTableNumber] = useState<number>(4);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Phase 1: Staff Users & PIN Authentication
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_STAFF);
+      return saved ? JSON.parse(saved) : INITIAL_STAFF_USERS;
+    } catch {
+      return INITIAL_STAFF_USERS;
+    }
+  });
+
+  const [currentStaff, setCurrentStaff] = useState<StaffUser>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_CURRENT_STAFF);
+      return saved ? JSON.parse(saved) : INITIAL_STAFF_USERS[3]; // Default to Admin for smooth setup
+    } catch {
+      return INITIAL_STAFF_USERS[3];
+    }
+  });
+
+  const [isScreenLocked, setIsScreenLocked] = useState<boolean>(false);
+
+  // Phase 2: Audit Logs
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_AUDIT);
+      return saved ? JSON.parse(saved) : [
+        {
+          id: 'audit-init-1',
+          timestamp: new Date(Date.now() - 3600000).toISOString(),
+          staffName: 'Manager Ankit (Admin/Owner)',
+          staffRole: 'admin',
+          action: 'DRAWER_OPEN',
+          details: 'POS system initialized with opening cash register float ₹2,000',
+          amount: 2000,
+        }
+      ];
+    } catch {
+      return [];
+    }
+  });
+
+  // Phase 3: Shift Register & Day-End Z-Report
+  const [activeShift, setActiveShift] = useState<RegisterShift | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SHIFT);
+      return saved ? JSON.parse(saved) : INITIAL_REGISTER_SHIFT;
+    } catch {
+      return INITIAL_REGISTER_SHIFT;
+    }
+  });
+
+  const [shiftHistory, setShiftHistory] = useState<RegisterShift[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SHIFT_HIST);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Phase 4: Multi-Tenant Architecture
+  const [tenantsList, setTenantsList] = useState<RestaurantTenant[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_TENANTS);
+      return saved ? JSON.parse(saved) : INITIAL_TENANTS;
+    } catch {
+      return INITIAL_TENANTS;
+    }
+  });
+
+  const [currentTenant, setCurrentTenant] = useState<RestaurantTenant>(() => {
+    return tenantsList[0] || INITIAL_TENANTS[0];
+  });
+
+  // Phase 5: Hardware Printer Config
+  const [printerConfig, setPrinterConfig] = useState<ThermalPrinterConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PRINTER);
+      return saved ? JSON.parse(saved) : DEFAULT_PRINTER_CONFIG;
+    } catch {
+      return DEFAULT_PRINTER_CONFIG;
+    }
+  });
+
+  // Phase 6: Commercial SaaS Subscription License
+  const [subscription, setSubscription] = useState<SubscriptionLicense>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SUBSCRIPTION);
+      return saved ? JSON.parse(saved) : DEFAULT_SUBSCRIPTION;
+    } catch {
+      return DEFAULT_SUBSCRIPTION;
+    }
+  });
+
+  // Business & Tax Settings
+  const [restaurantSettings, setRestaurantSettings] = useState<RestaurantSettings>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
+      return saved ? JSON.parse(saved) : DEFAULT_RESTAURANT_SETTINGS;
+    } catch {
+      return DEFAULT_RESTAURANT_SETTINGS;
+    }
+  });
+
+  // Single-File Menu state
+  const [menu, setMenu] = useState<MenuItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MENU);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return AMRAVATI_MENU;
+  });
 
   // Connectivity
   const [rawOnline, setRawOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(false);
   const isOnline = rawOnline && !isSimulatedOffline;
+
+  // Cloud Firestore Sync State
+  const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(() => {
+    return firebaseSyncService.isConnected();
+  });
 
   // Inventory State with localStorage
   const [inventory, setInventory] = useState<InventoryItem[]>(() => {
@@ -179,7 +390,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
-  // Sync to localStorage
+  // Save states to localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orders));
@@ -210,6 +421,58 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } catch {}
   }, [offlineQueue]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_STAFF, JSON.stringify(staffUsers));
+    } catch {}
+  }, [staffUsers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_CURRENT_STAFF, JSON.stringify(currentStaff));
+    } catch {}
+  }, [currentStaff]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_AUDIT, JSON.stringify(auditLogs));
+    } catch {}
+  }, [auditLogs]);
+
+  useEffect(() => {
+    try {
+      if (activeShift) {
+        localStorage.setItem(STORAGE_KEY_SHIFT, JSON.stringify(activeShift));
+      } else {
+        localStorage.removeItem(STORAGE_KEY_SHIFT);
+      }
+    } catch {}
+  }, [activeShift]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SHIFT_HIST, JSON.stringify(shiftHistory));
+    } catch {}
+  }, [shiftHistory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_TENANTS, JSON.stringify(tenantsList));
+    } catch {}
+  }, [tenantsList]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_PRINTER, JSON.stringify(printerConfig));
+    } catch {}
+  }, [printerConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(subscription));
+    } catch {}
+  }, [subscription]);
+
   // Online / Offline window listeners
   useEffect(() => {
     const handleOnline = () => setRawOnline(true);
@@ -222,7 +485,29 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, []);
 
-  // BroadcastChannel for instant multi-window/multi-tab sync between customer & KDS
+  // Notification helper
+  const addNotification = useCallback((title: string, body: string, type: PushNotificationMessage['type']) => {
+    const newMsg: PushNotificationMessage = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      title,
+      body,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type,
+      read: false,
+    };
+    setNotifications(prev => [newMsg, ...prev.slice(0, 19)]);
+
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(title, {
+          body,
+          icon: '/favicon.ico',
+        });
+      } catch {}
+    }
+  }, []);
+
+  // BroadcastChannel for instant local multi-window/multi-tab sync
   useEffect(() => {
     if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
     const channel = new BroadcastChannel('amravati_kds_sync_channel');
@@ -264,36 +549,363 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
-  // Notification helper
-  const addNotification = useCallback((title: string, body: string, type: PushNotificationMessage['type']) => {
-    const newMsg: PushNotificationMessage = {
-      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title,
-      body,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type,
-      read: false,
-    };
-    setNotifications(prev => [newMsg, ...prev.slice(0, 19)]);
-
-    // Trigger system notification if permitted
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      try {
-        new Notification(title, {
-          body,
-          icon: '/favicon.ico',
-        });
-      } catch {}
+  // Firestore Real-Time Subscriptions across devices
+  useEffect(() => {
+    if (!firebaseSyncService.isConnected()) {
+      setIsFirestoreConnected(false);
+      return;
     }
+
+    setIsFirestoreConnected(true);
+
+    const unsubOrders = firebaseSyncService.subscribeToOrders((remoteOrders) => {
+      if (!remoteOrders || remoteOrders.length === 0) return;
+      setOrders((prev) => {
+        const merged = [...prev];
+        remoteOrders.forEach((ro) => {
+          const idx = merged.findIndex((o) => o.id === ro.id || o.orderNumber === ro.orderNumber);
+          if (idx > -1) {
+            merged[idx] = ro;
+          } else {
+            merged.unshift(ro);
+            soundEffects.playKitchenBell();
+          }
+        });
+        return merged;
+      });
+    });
+
+    const unsubCalls = firebaseSyncService.subscribeToWaiterCalls((remoteCalls) => {
+      if (!remoteCalls || remoteCalls.length === 0) return;
+      setWaiterCalls((prev) => {
+        const merged = [...prev];
+        remoteCalls.forEach((rc) => {
+          if (!merged.some((c) => c.id === rc.id)) {
+            merged.unshift(rc);
+            soundEffects.playWaiterBuzz();
+          }
+        });
+        return merged;
+      });
+    });
+
+    return () => {
+      unsubOrders();
+      unsubCalls();
+    };
   }, []);
 
+  const connectFirestore = useCallback((config: FirebaseConfigData) => {
+    const success = firebaseSyncService.configure(config);
+    setIsFirestoreConnected(success);
+    return success;
+  }, []);
+
+  const disconnectFirestore = useCallback(() => {
+    firebaseSyncService.disconnect();
+    setIsFirestoreConnected(false);
+  }, []);
+
+  const updateRestaurantSettings = useCallback((newSettings: RestaurantSettings) => {
+    setRestaurantSettings(newSettings);
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(newSettings));
+    } catch {}
+  }, []);
+
+  // ==========================================
+  // PHASE 1: STAFF ROLES & 4-DIGIT PIN AUTH
+  // ==========================================
+  const loginWithPin = useCallback((pin: string) => {
+    const trimmed = pin.trim();
+    const matching = staffUsers.find(u => u.pin === trimmed && u.active);
+    if (matching) {
+      setCurrentStaff(matching);
+      setIsScreenLocked(false);
+      soundEffects.playClick();
+
+      // Role-based view routing
+      if (matching.role === 'kitchen') {
+        setCurrentView('kds');
+      } else if (matching.role === 'waiter') {
+        setCurrentView('tables');
+      } else if (matching.role === 'cashier') {
+        setCurrentView('tables');
+      }
+
+      addNotification('Staff Login Verified', `Welcome ${matching.name} (${matching.role.toUpperCase()})`, 'table');
+      return { success: true, staff: matching };
+    }
+    soundEffects.playWaiterBuzz();
+    return { success: false, error: 'Incorrect 4-digit PIN' };
+  }, [staffUsers, addNotification]);
+
+  const logoutStaff = useCallback(() => {
+    setIsScreenLocked(true);
+    soundEffects.playClick();
+  }, []);
+
+  const lockScreen = useCallback(() => {
+    setIsScreenLocked(true);
+  }, []);
+
+  const unlockScreen = useCallback((pin: string) => {
+    const res = loginWithPin(pin);
+    return res.success;
+  }, [loginWithPin]);
+
+  const switchStaffRole = useCallback((role: StaffRole) => {
+    const staff = staffUsers.find(s => s.role === role);
+    if (staff) {
+      setCurrentStaff(staff);
+      if (role === 'kitchen') setCurrentView('kds');
+      else if (role === 'waiter') setCurrentView('tables');
+    }
+  }, [staffUsers]);
+
+  const updateStaffPin = useCallback((staffId: string, newPin: string) => {
+    if (newPin.length !== 4 || isNaN(Number(newPin))) return false;
+    setStaffUsers(prev => prev.map(u => u.id === staffId ? { ...u, pin: newPin } : u));
+    return true;
+  }, []);
+
+  const isRoleAllowed = useCallback((allowedRoles: StaffRole[]) => {
+    if (!currentStaff) return false;
+    if (currentStaff.role === 'admin') return true;
+    return allowedRoles.includes(currentStaff.role);
+  }, [currentStaff]);
+
+  // ==========================================
+  // PHASE 2: FRAUD PREVENTION & AUDIT LOGS
+  // ==========================================
+  const addAuditLog = useCallback((
+    action: AuditLog['action'],
+    details: string,
+    orderId?: string,
+    amount?: number,
+    reason?: string
+  ) => {
+    const newEntry: AuditLog = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      staffName: currentStaff?.name || 'Staff',
+      staffRole: currentStaff?.role || 'waiter',
+      action,
+      details,
+      orderId,
+      amount,
+      reason,
+    };
+    setAuditLogs(prev => [newEntry, ...prev]);
+  }, [currentStaff]);
+
+  const voidOrderWithManagerApproval = useCallback((orderId: string, managerPin: string, reason: string) => {
+    const manager = staffUsers.find(u => u.role === 'admin' && u.pin === managerPin);
+    if (!manager) {
+      return { success: false, error: 'Invalid Manager PIN. Order voids strictly require manager authorization.' };
+    }
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      return { success: false, error: 'Order not found.' };
+    }
+
+    setOrders(prev => prev.map(o => o.id === orderId ? {
+      ...o,
+      status: 'cancelled',
+      voidReason: reason,
+      voidedBy: manager.name,
+    } : o));
+
+    // Restock ingredients
+    setInventory(prev => {
+      const updated = [...prev];
+      for (const item of order.items) {
+        const mi = menu.find(m => m.id === item.menuItemId);
+        if (mi?.inventoryItemId) {
+          const invIdx = updated.findIndex(i => i.id === mi.inventoryItemId);
+          if (invIdx > -1) {
+            const deductTotal = item.quantity * (mi.recipeDeduction?.amount ?? 1);
+            updated[invIdx] = {
+              ...updated[invIdx],
+              inStock: Number((updated[invIdx].inStock + deductTotal).toFixed(2)),
+            };
+          }
+        }
+      }
+      return updated;
+    });
+
+    // Free table
+    setTables(prev => prev.map(t => t.number === order.tableNumber ? {
+      ...t,
+      status: 'available',
+      currentOrderId: undefined,
+      currentGuestName: undefined,
+    } : t));
+
+    addAuditLog('ORDER_VOID', `Order #${order.orderNumber} (Table ${order.tableNumber}) voided by Manager ${manager.name}. Reason: ${reason}`, order.id, order.totalAmount, reason);
+    soundEffects.playWaiterBuzz();
+    addNotification('Order Voided by Manager', `Order #${order.orderNumber} voided. Ingredients restocked.`, 'order');
+
+    return { success: true };
+  }, [staffUsers, orders, menu, addAuditLog, addNotification]);
+
+  const recordBillReprint = useCallback((orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+    const currentCount = order.printCount || 1;
+    const updatedCount = currentCount + 1;
+
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printCount: updatedCount } : o));
+    addAuditLog('BILL_REPRINT', `Invoice #${order.invoiceNumber || order.orderNumber} re-printed (Copy #${updatedCount}) by ${currentStaff?.name || 'Staff'}`, order.id, order.totalAmount);
+  }, [orders, currentStaff, addAuditLog]);
+
+  // ==========================================
+  // PHASE 3: SHIFT & CASH REGISTER CLOSING
+  // ==========================================
+  const openRegisterShift = useCallback((openingFloat: number, notes?: string) => {
+    const newShift: RegisterShift = {
+      id: `shift-${Date.now()}`,
+      openedAt: new Date().toISOString(),
+      openedBy: currentStaff?.name || 'Cashier',
+      openingFloat,
+      cashSales: 0,
+      upiSales: 0,
+      cardSales: 0,
+      totalSales: 0,
+      expectedCash: openingFloat,
+      status: 'open',
+      notes,
+    };
+    setActiveShift(newShift);
+    addAuditLog('DRAWER_OPEN', `Register shift opened with float ₹${openingFloat} by ${newShift.openedBy}`, undefined, openingFloat);
+    return newShift;
+  }, [currentStaff, addAuditLog]);
+
+  const closeRegisterShift = useCallback((actualCashCounted: number, notes?: string) => {
+    if (!activeShift) throw new Error('No active shift to close');
+    const expected = activeShift.expectedCash;
+    const discrepancy = actualCashCounted - expected;
+
+    const closedShift: RegisterShift = {
+      ...activeShift,
+      closedAt: new Date().toISOString(),
+      closedBy: currentStaff?.name || 'Cashier',
+      actualCashCounted,
+      cashDiscrepancy: discrepancy,
+      status: 'closed',
+      notes: notes || activeShift.notes,
+    };
+
+    setActiveShift(null);
+    setShiftHistory(prev => [closedShift, ...prev]);
+    addAuditLog(
+      'REGISTER_CLOSE',
+      `Shift closed. Expected: ₹${expected}, Counted: ₹${actualCashCounted} (Discrepancy: ₹${discrepancy})`,
+      undefined,
+      closedShift.totalSales
+    );
+
+    return { shift: closedShift, discrepancy };
+  }, [activeShift, currentStaff, addAuditLog]);
+
+  // ==========================================
+  // PHASE 4: MULTI-TENANT ARCHITECTURE
+  // ==========================================
+  const switchTenant = useCallback((tenantId: string) => {
+    const t = tenantsList.find(x => x.tenantId === tenantId);
+    if (!t) return;
+    setCurrentTenant(t);
+    setRestaurantSettings(prev => ({
+      ...prev,
+      restaurantName: t.name,
+      city: t.city,
+      address: t.address,
+      phone: t.phone,
+      email: t.email || prev.email,
+      gstin: t.gstin,
+      fssaiNumber: t.fssaiNumber,
+      currencySymbol: t.currencySymbol,
+      tenantId: t.tenantId,
+    }));
+    addNotification('Switched Branch Workspace', `Now active in ${t.name} (${t.city})`, 'kitchen');
+  }, [tenantsList, addNotification]);
+
+  const createTenant = useCallback((tenantData: Omit<RestaurantTenant, 'createdAt'>) => {
+    const newTenant: RestaurantTenant = {
+      ...tenantData,
+      createdAt: new Date().toISOString(),
+    };
+    setTenantsList(prev => [...prev, newTenant]);
+    switchTenant(newTenant.tenantId);
+    return newTenant;
+  }, [switchTenant]);
+
+  // ==========================================
+  // PHASE 5: PRINTER CONFIG
+  // ==========================================
+  const updatePrinterConfig = useCallback((newConfig: ThermalPrinterConfig) => {
+    setPrinterConfig(newConfig);
+  }, []);
+
+  // ==========================================
+  // PHASE 6: COMMERCIAL SAAS SUBSCRIPTION
+  // ==========================================
+  const activateLicenseKey = useCallback((key: string) => {
+    if (key.trim().length < 6) {
+      return { success: false, message: 'Invalid key. Must be a valid commercial license code.' };
+    }
+    const updated: SubscriptionLicense = {
+      ...subscription,
+      licenseKey: key.trim().toUpperCase(),
+      status: 'active',
+      plan: 'Pro Cloud Multi-Device (₹1,499/mo)',
+      validUntil: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0],
+    };
+    setSubscription(updated);
+    addNotification('License Key Activated', 'Commercial Pro plan active for 365 days across all devices.', 'order');
+    return { success: true, message: 'License key verified! All commercial features unlocked.' };
+  }, [subscription, addNotification]);
+
+  // ==========================================
+  // SINGLE-FILE MENU ATTACHMENT / UPDATE
+  // ==========================================
+  const updateWholeMenu = useCallback((newMenu: MenuItem[]) => {
+    if (!Array.isArray(newMenu) || newMenu.length === 0) {
+      return { success: false, count: 0, error: 'File does not contain a valid dish array.' };
+    }
+    const validItems = newMenu.filter(item => item && item.id && item.name && typeof item.price === 'number');
+    if (validItems.length === 0) {
+      return { success: false, count: 0, error: 'No valid dishes detected.' };
+    }
+
+    setMenu(validItems);
+    try {
+      localStorage.setItem(STORAGE_KEY_MENU, JSON.stringify(validItems));
+    } catch {}
+
+    addAuditLog('MENU_IMPORTED', `Whole menu replaced from single file attachment (${validItems.length} items)`);
+    addNotification('Menu Updated', `Imported ${validItems.length} dishes from file attachment.`, 'kitchen');
+    return { success: true, count: validItems.length };
+  }, [addAuditLog, addNotification]);
+
+  const resetMenuToDefault = useCallback(() => {
+    setMenu(AMRAVATI_MENU);
+    try {
+      localStorage.removeItem(STORAGE_KEY_MENU);
+    } catch {}
+    addAuditLog('MENU_IMPORTED', 'Menu restored to authentic Amravati baseline');
+    addNotification('Menu Restored', 'Reset to authentic Amravati Varhad Rasoi default menu.', 'kitchen');
+  }, [addAuditLog, addNotification]);
+
+  // Push Permission
   const requestPushPermission = async () => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       try {
         const permission = await Notification.requestPermission();
         setPushPermissionState(permission);
         if (permission === 'granted') {
-          addNotification('Push Notifications Active', 'You will receive real-time order status updates for Amravati kitchen orders.', 'order');
+          addNotification('Push Notifications Active', 'Real-time order status updates enabled for all kitchen orders.', 'order');
           return true;
         }
       } catch {}
@@ -311,47 +923,44 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, [inventory]);
 
-  // Cart operations
-  const addToCart = useCallback((item: MenuItem, notes?: string) => {
-    const inventoryStock = inventory.find(i => i.id === item.inventoryItemId);
-    const existingInCart = cart.find(c => c.item.id === item.id)?.quantity || 0;
-    const requestedTotal = existingInCart + 1;
+  const updateInventoryStock = useCallback((itemId: string, newStock: number) => {
+    setInventory(prev => prev.map(i => i.id === itemId ? { ...i, inStock: Math.max(0, newStock) } : i));
+  }, []);
 
-    if (inventoryStock && inventoryStock.inStock < requestedTotal) {
+  const restockItem = useCallback((itemId: string, amount: number) => {
+    setInventory(prev => prev.map(i => i.id === itemId ? { ...i, inStock: i.inStock + amount } : i));
+    addNotification('Inventory Restocked', `Added ${amount} units to inventory stock.`, 'table');
+  }, [addNotification]);
+
+  // Cart Operations
+  const addToCart = useCallback((item: MenuItem, notes?: string) => {
+    const stockCheck = checkItemStockAvailability(item.inventoryItemId, 1);
+    if (!stockCheck.available) {
       return {
         success: false,
-        message: `Sorry! Only ${inventoryStock.inStock} ${inventoryStock.localUnit} of ${item.name} ingredients currently available in kitchen inventory.`,
+        message: `${item.name} is currently SOLD OUT (Stock: ${stockCheck.stockLeft}).`,
       };
     }
 
     setCart(prev => {
-      const idx = prev.findIndex(c => c.item.id === item.id);
-      if (idx > -1) {
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], quantity: updated[idx].quantity + 1, notes: notes || updated[idx].notes };
-        return updated;
+      const existing = prev.find(c => c.item.id === item.id && c.notes === notes);
+      if (existing) {
+        return prev.map(c => c === existing ? { ...c, quantity: c.quantity + 1 } : c);
       }
       return [...prev, { item, quantity: 1, notes }];
     });
 
+    soundEffects.playClick();
     return { success: true };
-  }, [cart, inventory]);
+  }, [checkItemStockAvailability]);
 
   const updateCartQuantity = useCallback((itemId: string, qty: number) => {
     if (qty <= 0) {
       setCart(prev => prev.filter(c => c.item.id !== itemId));
-      return;
+    } else {
+      setCart(prev => prev.map(c => c.item.id === itemId ? { ...c, quantity: qty } : c));
     }
-    const cartItem = cart.find(c => c.item.id === itemId);
-    if (cartItem) {
-      const stock = inventory.find(i => i.id === cartItem.item.inventoryItemId);
-      if (stock && stock.inStock < qty) {
-        addNotification('Stock Limit Reached', `Maximum ${stock.inStock} ${stock.localUnit} left in inventory for ${cartItem.item.name}.`, 'kitchen');
-        return;
-      }
-    }
-    setCart(prev => prev.map(c => c.item.id === itemId ? { ...c, quantity: qty } : c));
-  }, [cart, inventory, addNotification]);
+  }, []);
 
   const removeFromCart = useCallback((itemId: string) => {
     setCart(prev => prev.filter(c => c.item.id !== itemId));
@@ -362,45 +971,45 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const cartTotal = useMemo(() => {
-    return cart.reduce((sum, item) => sum + (item.item.price * item.quantity), 0);
+    return cart.reduce((sum, c) => sum + (c.item.price * c.quantity), 0);
   }, [cart]);
 
   const cartCount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.quantity, 0);
+    return cart.reduce((sum, c) => sum + c.quantity, 0);
   }, [cart]);
 
   // Order Placement
-  const placeOrder = async (customerName = 'Guest Customer', customerEmail = 'caankitgupta777@gmail.com', notes = '') => {
+  const placeOrder = async (customerName: string = 'Dine-In Guest', customerEmail?: string, notes?: string) => {
     if (cart.length === 0) {
-      return { success: false, message: 'Cart is empty. Please add delicious Amravati dishes first!' };
+      return { success: false, message: 'Cart is empty. Please add items.' };
     }
 
-    // Double check inventory
-    for (const cartItem of cart) {
-      const inv = inventory.find(i => i.id === cartItem.item.inventoryItemId);
-      if (inv && inv.inStock < cartItem.quantity) {
+    for (const c of cart) {
+      const avail = checkItemStockAvailability(c.item.inventoryItemId, c.quantity);
+      if (!avail.available) {
         return {
           success: false,
-          message: `Discrepancy alert: ${cartItem.item.name} only has ${inv.inStock} ${inv.localUnit} left in kitchen inventory. Please adjust quantity.`,
+          message: `Cannot place order: ${c.item.name} only has ${avail.stockLeft} portions left.`,
         };
       }
     }
 
-    const table = tables.find(t => t.number === customerTableNumber);
+    const orderNumber = `VR-${Math.floor(100 + Math.random() * 900)}`;
+    const currentTable = tables.find(t => t.number === customerTableNumber);
     const subtotal = cartTotal;
-    const cgst = Number((subtotal * 0.025).toFixed(2));
-    const sgst = Number((subtotal * 0.025).toFixed(2));
-    const totalAmount = Math.round(subtotal + cgst + sgst);
-
-    const randomSuffix = Math.floor(100 + Math.random() * 900);
-    const orderNumber = `AMR-${randomSuffix}`;
+    const cgst = Number(((subtotal * restaurantSettings.cgstRate) / 100).toFixed(2));
+    const sgst = Number(((subtotal * restaurantSettings.sgstRate) / 100).toFixed(2));
+    const serviceCharge = restaurantSettings.serviceChargeRate > 0
+      ? Number(((subtotal * restaurantSettings.serviceChargeRate) / 100).toFixed(2))
+      : 0;
+    const totalAmount = Math.round(subtotal + cgst + sgst + serviceCharge);
 
     const newOrder: Order = {
-      id: `ord-${Date.now()}`,
+      id: `ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       orderNumber,
-      tableId: table?.id || `tbl-${customerTableNumber}`,
+      tableId: currentTable?.id || `tbl-${customerTableNumber}`,
       tableNumber: customerTableNumber,
-      section: table?.section || 'AC Dining Hall',
+      section: currentTable?.section || 'AC Dining Hall',
       items: cart.map(c => ({
         menuItemId: c.item.id,
         name: c.item.name,
@@ -414,6 +1023,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       subtotal,
       cgst,
       sgst,
+      serviceCharge,
       totalAmount,
       status: 'received',
       paymentStatus: 'unpaid',
@@ -423,25 +1033,27 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       customerEmail,
       waiterNotes: notes,
       isOfflineCreated: !isOnline,
+      tenantId: currentTenant.tenantId,
     };
 
-    // Auto-deduct inventory
+    // Recipe deductions
     setInventory(prev => {
       const updated = [...prev];
       for (const cartItem of cart) {
         const idx = updated.findIndex(i => i.id === cartItem.item.inventoryItemId);
         if (idx > -1) {
-          const deductAmount = cartItem.quantity * (cartItem.item.inventoryItemId.includes('kg') ? 0.25 : 1);
+          const perUnit = cartItem.item.recipeDeduction?.amount ?? (cartItem.item.inventoryItemId.includes('kg') ? 0.25 : 1);
+          const deductTotal = Number((cartItem.quantity * perUnit).toFixed(2));
           updated[idx] = {
             ...updated[idx],
-            inStock: Math.max(0, Number((updated[idx].inStock - deductAmount).toFixed(1))),
+            inStock: Math.max(0, Number((updated[idx].inStock - deductTotal).toFixed(2))),
           };
         }
       }
       return updated;
     });
 
-    // Update table status to occupied
+    // Update table status
     setTables(prev => prev.map(t => t.number === customerTableNumber ? {
       ...t,
       status: 'occupied',
@@ -449,13 +1061,16 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       currentGuestName: customerName,
     } : t));
 
+    if (firebaseSyncService.isConnected()) {
+      firebaseSyncService.syncOrder(newOrder);
+    }
+
     if (!isOnline) {
-      // Offline mode: enqueue
       setOfflineQueue(prev => [newOrder, ...prev]);
       setOrders(prev => [newOrder, ...prev]);
       soundEffects.playKitchenBell();
       clearCart();
-      addNotification('Order Saved Offline', `Order #${orderNumber} stored locally. It will auto-sync to KDS once network reconnects.`, 'order');
+      addNotification('Order Saved Offline', `Order #${orderNumber} queued locally. It will auto-sync once reconnected.`, 'order');
       return {
         success: true,
         order: newOrder,
@@ -463,18 +1078,17 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     }
 
-    // Online: add to orders & broadcast to KDS
     setOrders(prev => [newOrder, ...prev]);
     soundEffects.playKitchenBell();
     broadcastEvent('NEW_ORDER', newOrder);
     clearCart();
 
-    addNotification('Order Sent to Kitchen Display', `Order #${orderNumber} for Table ${customerTableNumber} dispatched directly to Chef station!`, 'kitchen');
+    addNotification('Order Sent to Kitchen Display', `Order #${orderNumber} (Table ${customerTableNumber}) sent to Kitchen Display System!`, 'kitchen');
 
     return {
       success: true,
       order: newOrder,
-      message: `Order #${orderNumber} successfully sent to Kitchen Display System!`,
+      message: `Order #${orderNumber} sent to Kitchen Display System!`,
     };
   };
 
@@ -482,9 +1096,11 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const syncOfflineQueue = useCallback(() => {
     if (offlineQueue.length === 0) return;
     
-    // Broadcast all offline orders
     offlineQueue.forEach(ord => {
       broadcastEvent('NEW_ORDER', { ...ord, isOfflineCreated: false, syncedAt: new Date().toISOString() });
+      if (firebaseSyncService.isConnected()) {
+        firebaseSyncService.syncOrder(ord);
+      }
     });
 
     setOrders(prev => prev.map(o => {
@@ -494,11 +1110,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return o;
     }));
 
-    addNotification('Offline Orders Synced', `Successfully synced ${offlineQueue.length} queued order(s) with the Kitchen Display System!`, 'kitchen');
+    addNotification('Offline Orders Synced', `Synced ${offlineQueue.length} queued order(s) with Kitchen Display System!`, 'kitchen');
     setOfflineQueue([]);
   }, [offlineQueue, broadcastEvent, addNotification]);
 
-  // Auto-sync when reconnecting
   useEffect(() => {
     if (isOnline && offlineQueue.length > 0) {
       syncOfflineQueue();
@@ -520,14 +1135,18 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         if (status === 'ready') {
           soundEffects.playOrderReady();
-          addNotification('Dish Ready for Table ' + o.tableNumber, `Chef has prepared Order #${o.orderNumber}. Ready for server pickup!`, 'order');
+          addNotification('Dish Ready for Table ' + o.tableNumber, `Chef finished preparing Order #${o.orderNumber}. Ready for server pickup!`, 'order');
         } else if (status === 'served') {
-          addNotification('Order Served', `Order #${o.orderNumber} successfully served to Table ${o.tableNumber}.`, 'order');
-          // Table moves to billing/dining
+          addNotification('Order Served to Table ' + o.tableNumber, `Order #${o.orderNumber} served. Ready for billing when requested.`, 'order');
           setTables(tPrev => tPrev.map(t => t.number === o.tableNumber ? { ...t, status: 'billing' } : t));
         }
 
         broadcastEvent('ORDER_STATUS_UPDATE', { orderId, status });
+
+        if (firebaseSyncService.isConnected()) {
+          firebaseSyncService.updateOrderStatus(orderId, status, updatedItems);
+        }
+
         return updatedOrder;
       }
       return o;
@@ -542,44 +1161,96 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (newItems[itemIdx]) {
           newItems[itemIdx] = { ...newItems[itemIdx], status: itemStatus };
         }
-        // If all items ready, update entire order
+
+        const allServed = newItems.every(i => i.status === 'served');
         const allReady = newItems.every(i => i.status === 'ready' || i.status === 'served');
-        const nextStatus = allReady ? 'ready' : 'in_kitchen';
+        const anyPreparing = newItems.some(i => i.status === 'preparing' || i.status === 'ready');
+
+        let nextStatus: OrderStatus = o.status;
+        if (allServed) {
+          nextStatus = 'served';
+          setTables(tPrev => tPrev.map(t => t.number === o.tableNumber ? { ...t, status: 'billing' } : t));
+        } else if (allReady) {
+          nextStatus = 'ready';
+        } else if (anyPreparing) {
+          nextStatus = 'in_kitchen';
+        }
+
         if (allReady && o.status !== 'ready') {
           soundEffects.playOrderReady();
-          addNotification('Order Ready!', `All items for Order #${o.orderNumber} (Table ${o.tableNumber}) are plated and ready!`, 'order');
+          addNotification('Order Ready!', `All items for Order #${o.orderNumber} (Table ${o.tableNumber}) are plated!`, 'order');
         }
-        return { ...o, items: newItems, status: nextStatus };
+
+        const updatedOrder = { ...o, items: newItems, status: nextStatus };
+
+        if (firebaseSyncService.isConnected()) {
+          firebaseSyncService.updateOrderStatus(orderId, nextStatus, newItems);
+        }
+
+        return updatedOrder;
       }
       return o;
     }));
   }, [addNotification]);
 
-  // Split payment and automated invoicing
-  const processSplitPayment = useCallback(async (
+  // Process direct payment settlement & update Shift cash drawer
+  const processPayment = useCallback(async (
     orderId: string,
-    splitInfo: SplitPaymentInfo,
-    customerEmail: string
+    paymentMethod: 'upi' | 'card' | 'cash' | 'netbanking',
+    customerEmail?: string
   ) => {
     const invoiceNumber = `INV-VR-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const targetOrder = orders.find(o => o.id === orderId);
+    const paidAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     setOrders(prev => prev.map(o => {
       if (o.id === orderId) {
-        return {
+        const completedOrder: Order = {
           ...o,
           status: 'completed',
           paymentStatus: 'paid',
-          splitPayment: splitInfo,
+          paymentMethod,
+          paidAt,
           invoiceGenerated: true,
           invoiceNumber,
           customerEmail: customerEmail || o.customerEmail,
+          printCount: 1,
         };
+
+        if (firebaseSyncService.isConnected()) {
+          firebaseSyncService.syncOrder(completedOrder);
+        }
+
+        return completedOrder;
       }
       return o;
     }));
 
-    // Free the table
-    const targetOrder = orders.find(o => o.id === orderId);
+    // Update active register shift with collected amounts
+    if (activeShift && targetOrder) {
+      const amount = targetOrder.totalAmount;
+      const addCash = paymentMethod === 'cash' ? amount : 0;
+      const addUpi = paymentMethod === 'upi' ? amount : 0;
+      const addCard = paymentMethod === 'card' || paymentMethod === 'netbanking' ? amount : 0;
+
+      setActiveShift(prev => {
+        if (!prev) return null;
+        const newCashSales = prev.cashSales + addCash;
+        const newUpiSales = prev.upiSales + addUpi;
+        const newCardSales = prev.cardSales + addCard;
+        const newTotalSales = prev.totalSales + amount;
+        return {
+          ...prev,
+          cashSales: newCashSales,
+          upiSales: newUpiSales,
+          cardSales: newCardSales,
+          totalSales: newTotalSales,
+          expectedCash: prev.openingFloat + newCashSales,
+        };
+      });
+    }
+
+    // Free the table for next party / cleaning
     if (targetOrder) {
       setTables(prev => prev.map(t => t.number === targetOrder.tableNumber ? {
         ...t,
@@ -590,21 +1261,28 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
 
     soundEffects.playPaymentSuccess();
-    addNotification(
-      'Payment & Invoice Generated',
-      `Payment settled for ${invoiceNumber}. Tax invoice automatically sent to ${customerEmail}.`,
-      'payment'
-    );
+    addAuditLog('DISCOUNT_APPLIED', `Invoice ${invoiceNumber} settled via ${paymentMethod.toUpperCase()} (Amount: ₹${targetOrder?.totalAmount}) by ${currentStaff?.name || 'Cashier'}`);
+    addNotification('Payment Recorded', `Payment settled via ${paymentMethod.toUpperCase()} for ${invoiceNumber}. Tax invoice generated for printing.`, 'payment');
 
     return { success: true, invoiceNumber };
-  }, [orders, addNotification]);
+  }, [orders, activeShift, currentStaff, addAuditLog, addNotification]);
+
+  // Backward compatible wrapper for legacy calls
+  const processSplitPayment = useCallback(async (
+    orderId: string,
+    splitInfo: SplitPaymentInfo,
+    customerEmail: string
+  ) => {
+    const primaryMethod = splitInfo.shares[0]?.paymentMethod || 'upi';
+    return processPayment(orderId, primaryMethod, customerEmail);
+  }, [processPayment]);
 
   // Table Booking
   const bookTable = useCallback((bookingData: Omit<TableBooking, 'id' | 'bookingRef' | 'createdAt' | 'status'>) => {
     const bookingRef = `BKG-VR-${Math.floor(100 + Math.random() * 900)}`;
     const newBooking: TableBooking = {
       ...bookingData,
-      id: `bkg-${Date.now()}`,
+      id: `bkg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       bookingRef,
       status: 'confirmed',
       createdAt: new Date().toISOString(),
@@ -612,7 +1290,6 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     setBookings(prev => [newBooking, ...prev]);
 
-    // Mark table reserved
     setTables(prev => prev.map(t => t.number === bookingData.tableNumber ? {
       ...t,
       status: 'reserved',
@@ -621,7 +1298,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } : t));
 
     addNotification(
-      'Table Reservation Confirmed',
+      'Reservation Confirmed',
       `Table #${bookingData.tableNumber} reserved for ${bookingData.customerName} on ${bookingData.date} at ${bookingData.timeSlot}. Ref: ${bookingRef}`,
       'table'
     );
@@ -629,7 +1306,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return {
       success: true,
       bookingRef,
-      message: `Table #${bookingData.tableNumber} booked successfully! Booking Ref: ${bookingRef}`,
+      message: `Table #${bookingData.tableNumber} booked for ${bookingData.customerName} at ${bookingData.timeSlot}`,
     };
   }, [addNotification]);
 
@@ -637,38 +1314,33 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status } : t));
   }, []);
 
-  // Waiter Calls
   const callWaiter = useCallback((tableNumber: number, type: WaiterCall['type']) => {
-    const uniqueId = `call-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const newCall: WaiterCall = {
-      id: uniqueId,
+      id: `call-${Date.now()}`,
       tableNumber,
       type,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: 'pending',
     };
-    setWaiterCalls(prev => {
-      if (prev.some(c => c.id === uniqueId)) return prev;
-      return [newCall, ...prev];
-    });
+
+    setWaiterCalls(prev => [newCall, ...prev]);
     soundEffects.playWaiterBuzz();
     broadcastEvent('WAITER_CALL', newCall);
-    addNotification('Table Request', `Table ${tableNumber} requested ${type.toUpperCase()}. Waiter notified.`, 'table');
+
+    if (firebaseSyncService.isConnected()) {
+      firebaseSyncService.syncWaiterCall(newCall);
+    }
+
+    addNotification(
+      `Service Alert: Table #${tableNumber}`,
+      `Guest requested ${type.toUpperCase()} assistance.`,
+      'table'
+    );
   }, [broadcastEvent, addNotification]);
 
   const resolveWaiterCall = useCallback((callId: string) => {
     setWaiterCalls(prev => prev.filter(c => c.id !== callId));
   }, []);
-
-  // Inventory Management
-  const updateInventoryStock = useCallback((itemId: string, newStock: number) => {
-    setInventory(prev => prev.map(item => item.id === itemId ? { ...item, inStock: Math.max(0, newStock) } : item));
-  }, []);
-
-  const restockItem = useCallback((itemId: string, amount: number) => {
-    setInventory(prev => prev.map(item => item.id === itemId ? { ...item, inStock: item.inStock + amount } : item));
-    addNotification('Inventory Restocked', `Item restocked (+${amount} units).`, 'kitchen');
-  }, [addNotification]);
 
   const clearNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -685,7 +1357,57 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setCurrentView,
         customerTableNumber,
         setCustomerTableNumber,
+        restaurantSettings,
+        updateRestaurantSettings,
+        isSettingsOpen,
+        setIsSettingsOpen,
+
+        // Phase 1: Security & Staff Roles
+        staffUsers,
+        currentStaff,
+        isScreenLocked,
+        setIsScreenLocked,
+        loginWithPin,
+        logoutStaff,
+        lockScreen,
+        unlockScreen,
+        switchStaffRole,
+        updateStaffPin,
+        isRoleAllowed,
+
+        // Phase 2: Audit Logs & Order Voids
+        auditLogs,
+        addAuditLog,
+        voidOrderWithManagerApproval,
+        recordBillReprint,
+
+        // Phase 3: Shift Management
+        activeShift,
+        shiftHistory,
+        openRegisterShift,
+        closeRegisterShift,
+
+        // Phase 4: Multi-Tenant Architecture
+        currentTenant,
+        tenantsList,
+        switchTenant,
+        createTenant,
+
+        // Phase 5: Hardware Printer
+        printerConfig,
+        updatePrinterConfig,
+
+        // Phase 6: Commercial SaaS
+        subscription,
+        activateLicenseKey,
+
+        // Cloud & Offline
+        isFirestoreConnected,
+        connectFirestore,
+        disconnectFirestore,
         menu,
+        updateWholeMenu,
+        resetMenuToDefault,
         inventory,
         tables,
         orders,
@@ -707,6 +1429,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         placeOrder,
         updateOrderStatus,
         updateOrderItemStatus,
+        processPayment,
         processSplitPayment,
         bookTable,
         updateTableStatus,
