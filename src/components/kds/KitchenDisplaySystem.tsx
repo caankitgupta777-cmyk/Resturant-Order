@@ -273,7 +273,7 @@ export const KitchenDisplaySystem: React.FC = () => {
                       const isItemMatchingStation = selectedStation === 'All Stations' || item.station === selectedStation;
                       return (
                         <div
-                          key={idx}
+                          key={`${order.id}-item-${item.menuItemId}-${idx}`}
                           className={`py-2.5 flex items-start justify-between gap-3 text-xs ${
                             !isItemMatchingStation ? 'opacity-40' : ''
                           }`}

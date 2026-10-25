@@ -230,16 +230,22 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     channel.onmessage = (event) => {
       const { type, payload } = event.data || {};
       if (type === 'NEW_ORDER') {
+        if (!payload || !payload.id) return;
         setOrders(prev => {
           if (prev.some(o => o.id === payload.id)) return prev;
           soundEffects.playKitchenBell();
           return [payload, ...prev];
         });
       } else if (type === 'ORDER_STATUS_UPDATE') {
+        if (!payload || !payload.orderId) return;
         setOrders(prev => prev.map(o => o.id === payload.orderId ? { ...o, status: payload.status } : o));
       } else if (type === 'WAITER_CALL') {
-        soundEffects.playWaiterBuzz();
-        setWaiterCalls(prev => [payload, ...prev]);
+        if (!payload || !payload.id) return;
+        setWaiterCalls(prev => {
+          if (prev.some(c => c.id === payload.id)) return prev;
+          soundEffects.playWaiterBuzz();
+          return [payload, ...prev];
+        });
       }
     };
 
@@ -633,14 +639,18 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Waiter Calls
   const callWaiter = useCallback((tableNumber: number, type: WaiterCall['type']) => {
+    const uniqueId = `call-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const newCall: WaiterCall = {
-      id: `call-${Date.now()}`,
+      id: uniqueId,
       tableNumber,
       type,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: 'pending',
     };
-    setWaiterCalls(prev => [newCall, ...prev]);
+    setWaiterCalls(prev => {
+      if (prev.some(c => c.id === uniqueId)) return prev;
+      return [newCall, ...prev];
+    });
     soundEffects.playWaiterBuzz();
     broadcastEvent('WAITER_CALL', newCall);
     addNotification('Table Request', `Table ${tableNumber} requested ${type.toUpperCase()}. Waiter notified.`, 'table');

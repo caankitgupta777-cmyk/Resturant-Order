@@ -143,29 +143,31 @@ export const TableManagementView: React.FC = () => {
         <div className="bg-red-950/30 border border-red-500/40 rounded-2xl p-4 shadow-lg space-y-2">
           <div className="flex items-center gap-2 text-xs font-bold text-red-400">
             <BellRing className="w-4 h-4 animate-bounce" />
-            <span>Active Server Requests ({waiterCalls.length})</span>
+            <span>Active Server Requests ({waiterCalls.filter((c, i, a) => i === a.findIndex(x => x.id === c.id)).length})</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-            {waiterCalls.map(call => (
-              <div
-                key={call.id}
-                className="p-2.5 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-between text-xs"
-              >
-                <div>
-                  <span className="font-extrabold text-white">Table #{call.tableNumber}</span>
-                  <p className="text-[11px] text-amber-400 capitalize">Requested: {call.type}</p>
-                  <span className="text-[10px] text-neutral-500">{call.timestamp}</span>
-                </div>
-                <button
-                  onClick={() => resolveWaiterCall(call.id)}
-                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
+            {waiterCalls
+              .filter((c, i, a) => i === a.findIndex(x => x.id === c.id))
+              .map((call, idx) => (
+                <div
+                  key={`${call.id}-${idx}`}
+                  className="p-2.5 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-between text-xs"
                 >
-                  <Check className="w-3 h-3" />
-                  <span>Done</span>
-                </button>
-              </div>
-            ))}
+                  <div>
+                    <span className="font-extrabold text-white">Table #{call.tableNumber}</span>
+                    <p className="text-[11px] text-amber-400 capitalize">Requested: {call.type}</p>
+                    <span className="text-[10px] text-neutral-500">{call.timestamp}</span>
+                  </div>
+                  <button
+                    onClick={() => resolveWaiterCall(call.id)}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
+                  >
+                    <Check className="w-3 h-3" />
+                    <span>Done</span>
+                  </button>
+                </div>
+              ))}
           </div>
         </div>
       )}
