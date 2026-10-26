@@ -18,7 +18,8 @@ import { AuditLogViewerModal } from './components/audit/AuditLogViewerModal';
 import { TenantOnboardingModal } from './components/tenant/TenantOnboardingModal';
 import { ThermalPrinterModal } from './components/hardware/ThermalPrinterModal';
 import { SubscriptionLicenseModal } from './components/saas/SubscriptionLicenseModal';
-import { Sparkles } from 'lucide-react';
+import { AndroidAppModal } from './components/android/AndroidAppModal';
+import { Sparkles, Smartphone } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
   const {
@@ -41,6 +42,7 @@ const MainAppContent: React.FC = () => {
   const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  const [isAndroidModalOpen, setIsAndroidModalOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'business' | 'tax' | 'firebase' | 'menu' | 'onboarding'>('business');
   const [voidOrderId, setVoidOrderId] = useState<string | null>(null);
 
@@ -62,6 +64,7 @@ const MainAppContent: React.FC = () => {
           setSettingsTab('onboarding');
           setIsSettingsOpen(true);
         }}
+        onOpenAndroidApp={() => setIsAndroidModalOpen(true)}
       />
 
       {/* Main Content Viewport */}
@@ -176,8 +179,25 @@ const MainAppContent: React.FC = () => {
         onClose={() => setIsSubscriptionModalOpen(false)}
       />
 
-      {/* Floating Action Button for Client Onboarding & DB Reset */}
-      <div className="fixed bottom-5 right-5 z-40 no-print">
+      {/* Android Native & WebAPK App Hub Modal */}
+      <AndroidAppModal
+        isOpen={isAndroidModalOpen}
+        onClose={() => setIsAndroidModalOpen(false)}
+      />
+
+      {/* Floating Action Controls for Android & Client Onboarding */}
+      <div className="fixed bottom-5 right-5 z-40 flex items-center gap-2.5 no-print">
+        <button
+          type="button"
+          onClick={() => setIsAndroidModalOpen(true)}
+          className="flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-neutral-950 font-black text-xs rounded-full shadow-2xl border-2 border-emerald-300 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          title="Download or Install Android App (.APK & WebAPK)"
+        >
+          <Smartphone className="w-4 h-4 fill-neutral-950 text-neutral-950" />
+          <span className="hidden sm:inline">📱 Android App</span>
+          <span className="sm:hidden">Android</span>
+        </button>
+
         <button
           type="button"
           onClick={() => {

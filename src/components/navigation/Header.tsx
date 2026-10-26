@@ -24,6 +24,7 @@ import {
   Printer,
   Zap,
   Sparkles,
+  Smartphone,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -35,6 +36,7 @@ interface HeaderProps {
   onOpenPrinter: () => void;
   onOpenSubscription: () => void;
   onOpenOnboarding?: () => void;
+  onOpenAndroidApp?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -46,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPrinter,
   onOpenSubscription,
   onOpenOnboarding,
+  onOpenAndroidApp,
 }) => {
   const {
     currentView,
@@ -223,6 +226,17 @@ export const Header: React.FC<HeaderProps> = ({
             title="POS Settings & Single File Menu Attachment"
           >
             <Settings className="w-4 h-4" />
+          </button>
+
+          {/* Android App & APK Hub Trigger */}
+          <button
+            type="button"
+            onClick={onOpenAndroidApp}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 transition cursor-pointer shadow-sm shrink-0"
+            title="Open Android App, APK Builder & Tablet Install Hub"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden md:inline font-bold">Android App</span>
           </button>
 
           {/* Client Onboarding / Database Reset Button - Always Prominent */}
