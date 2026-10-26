@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useRestaurant } from '../../context/RestaurantContext';
-import { Building2, Plus, Check, X, Store, MapPin, Phone, FileCheck } from 'lucide-react';
+import { Building2, Plus, Check, X, Store, MapPin, Phone, FileCheck, Sparkles } from 'lucide-react';
 
 interface TenantOnboardingModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenClientWizard?: () => void;
 }
 
-export const TenantOnboardingModal: React.FC<TenantOnboardingModalProps> = ({ isOpen, onClose }) => {
+export const TenantOnboardingModal: React.FC<TenantOnboardingModalProps> = ({ isOpen, onClose, onOpenClientWizard }) => {
   const { currentTenant, tenantsList, switchTenant, createTenant } = useRestaurant();
   const [isAddingNew, setIsAddingNew] = useState(false);
 
@@ -68,6 +69,29 @@ export const TenantOnboardingModal: React.FC<TenantOnboardingModalProps> = ({ is
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Quick Launch Wizard Banner */}
+        {onOpenClientWizard && (
+          <div className="p-3 bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-transparent border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-white">Full Client Onboarding &amp; Database Reset Wizard</h4>
+                <p className="text-[10px] text-neutral-400">Configure client branding, UPI VPA, table count &amp; starter menu</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenClientWizard();
+              }}
+              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold rounded-xl text-xs shrink-0 cursor-pointer shadow-md"
+            >
+              Open Wizard
+            </button>
+          </div>
+        )}
 
         {!isAddingNew ? (
           <div className="space-y-4">

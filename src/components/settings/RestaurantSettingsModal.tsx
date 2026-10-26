@@ -23,16 +23,25 @@ import {
   UtensilsCrossed,
   Check,
   AlertCircle,
+  Sparkles,
+  Trash2,
+  RefreshCw,
+  Store,
+  Rocket,
+  Lock,
 } from 'lucide-react';
+import { ClientOnboardingOptions } from '../../types/restaurant';
 
 interface RestaurantSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'business' | 'tax' | 'firebase' | 'menu' | 'onboarding';
 }
 
 export const RestaurantSettingsModal: React.FC<RestaurantSettingsModalProps> = ({
   isOpen,
   onClose,
+  initialTab = 'business',
 }) => {
   const {
     restaurantSettings,
@@ -43,12 +52,46 @@ export const RestaurantSettingsModal: React.FC<RestaurantSettingsModalProps> = (
     menu,
     updateWholeMenu,
     resetMenuToDefault,
+    resetDatabaseForNewClient,
+    wipeTestDataOnly,
+    resetToDemoData,
+    tables,
+    orders,
+    currentStaff,
   } = useRestaurant();
 
-  const [activeTab, setActiveTab] = useState<'business' | 'tax' | 'firebase' | 'menu'>('business');
+  const [activeTab, setActiveTab] = useState<'business' | 'tax' | 'firebase' | 'menu' | 'onboarding'>(initialTab);
+
+  React.useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   // Business and Tax form state
   const [formData, setFormData] = useState<RestaurantSettings>(restaurantSettings);
+
+  // Client Onboarding Form State
+  const [onboardingData, setOnboardingData] = useState<ClientOnboardingOptions>({
+    restaurantName: '',
+    tagline: 'Authentic Flavors & Quality Service',
+    city: 'Amravati',
+    address: '',
+    phone: '+91 ',
+    email: '',
+    gstin: '',
+    fssaiNumber: '',
+    merchantUpiId: '',
+    currencySymbol: '₹',
+    cgstRate: 2.5,
+    sgstRate: 2.5,
+    serviceChargeRate: 0,
+    tableCount: 10,
+    openingFloat: 2000,
+    menuPreset: 'cafe_fastfood',
+  });
+  const [wipeSafetyPin, setWipeSafetyPin] = useState('');
+  const [onboardingStatusMsg, setOnboardingStatusMsg] = useState<{ success: boolean; text: string } | null>(null);
 
   // Menu file attachment state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +269,60 @@ export const RestaurantSettingsModal: React.FC<RestaurantSettingsModalProps> = (
     }
   };
 
+  const handleOnboardSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onboardingData.restaurantName.trim()) {
+      setOnboardingStatusMsg({ success: false, text: 'Please enter restaurant legal or brand name.' });
+      return;
+    }
+
+    if (window.confirm(`Initialize ${onboardingData.restaurantName} with ${onboardingData.tableCount} tables? This will wipe previous orders and start a clean database.`)) {
+      resetDatabaseForNewClient(onboardingData);
+      setFormData(prev => ({
+        ...prev,
+        restaurantName: onboardingData.restaurantName,
+        tagline: onboardingData.tagline || '',
+        address: onboardingData.address,
+        city: onboardingData.city,
+        state: onboardingData.state || '',
+        phone: onboardingData.phone,
+        email: onboardingData.email || '',
+        gstin: onboardingData.gstin || '',
+        fssaiNumber: onboardingData.fssaiNumber || '',
+        merchantUpiId: onboardingData.merchantUpiId || '',
+      }));
+      setOnboardingStatusMsg({
+        success: true,
+        text: `Success! ${onboardingData.restaurantName} is live with ${onboardingData.tableCount} tables and opening float ₹${onboardingData.openingFloat}.`,
+      });
+    }
+  };
+
+  const handleWipeTestData = () => {
+    if (wipeSafetyPin.trim() !== '9999' && currentStaff.pin !== wipeSafetyPin.trim()) {
+      alert('Security Check Failed: Please enter the Admin PIN (default 9999) to wipe test data.');
+      return;
+    }
+    if (window.confirm('Are you sure you want to wipe all test orders and reset tables to available? This cannot be undone.')) {
+      wipeTestDataOnly(2000);
+      setWipeSafetyPin('');
+      setOnboardingStatusMsg({
+        success: true,
+        text: 'Live Launch Reset Complete! All test orders wiped. The POS is ready for real customers.',
+      });
+    }
+  };
+
+  const handleRestoreDemo = () => {
+    if (window.confirm('Restore default Amravati Varhad Rasoi showcase dataset?')) {
+      resetToDemoData();
+      setOnboardingStatusMsg({
+        success: true,
+        text: 'Showcase demo dataset restored successfully.',
+      });
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-5 overflow-y-auto">
       <div className="w-full max-w-2xl bg-neutral-900 border border-neutral-750 rounded-2xl shadow-2xl overflow-hidden my-auto text-neutral-100 flex flex-col max-h-[92vh]">
@@ -307,6 +404,21 @@ export const RestaurantSettingsModal: React.FC<RestaurantSettingsModalProps> = (
             {isFirestoreConnected && (
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('onboarding')}
+            className={`px-3.5 py-2 text-xs font-bold border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'onboarding'
+                ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                : 'border-transparent text-amber-300 hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Client Onboarding &amp; Reset DB</span>
+            <span className="text-[9px] uppercase px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold">
+              New Client
+            </span>
           </button>
         </div>
 
@@ -825,6 +937,367 @@ export const RestaurantSettingsModal: React.FC<RestaurantSettingsModalProps> = (
               </div>
             </div>
           )}
+
+          {activeTab === 'onboarding' && (
+            <div className="space-y-6 text-xs">
+              {/* Top Launchpad Card */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-red-500/10 border border-amber-500/30 flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
+                      Client Launchpad &amp; Database Reset
+                    </span>
+                    <span className="text-[10px] text-neutral-400 font-mono">
+                      Active: {restaurantSettings.restaurantName}
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-white font-['Outfit']">
+                    Commercial Multi-Client Setup &amp; Production Deployment
+                  </h3>
+                  <p className="text-neutral-300 text-xs leading-relaxed max-w-xl">
+                    Configure a brand-new restaurant client with their custom branding &amp; merchant UPI, wipe test orders for day 1 launch, or restore demo presentation data for sales pitches.
+                  </p>
+                </div>
+                <Rocket className="w-9 h-9 text-amber-400 shrink-0 hidden sm:block opacity-80" />
+              </div>
+
+              {onboardingStatusMsg && (
+                <div className={`p-3.5 rounded-xl border flex items-center justify-between text-xs ${
+                  onboardingStatusMsg.success
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-red-500/15 border-red-500/40 text-red-300'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    {onboardingStatusMsg.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />}
+                    <span className="font-semibold">{onboardingStatusMsg.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOnboardingStatusMsg(null)}
+                    className="text-neutral-400 hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* 1. Fast Client Onboarding Wizard Form */}
+              <form onSubmit={handleOnboardSubmit} className="p-4 sm:p-5 bg-neutral-950 rounded-2xl border border-neutral-800 space-y-4">
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400">
+                      <Store className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-white text-sm">1. Fast Client Onboarding Wizard</h4>
+                      <p className="text-[11px] text-neutral-400">Deploy fresh instance for a new client with their branding &amp; UPI QR</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono text-neutral-500">Step 1 of 1</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Restaurant / Cafe / Cloud Kitchen Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Royal Spice Bistro & Cafe"
+                      value={onboardingData.restaurantName}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, restaurantName: e.target.value })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Tagline / Concept
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Artisanal Coffee & Stone Oven Pizzas"
+                      value={onboardingData.tagline || ''}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, tagline: e.target.value })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      City &amp; State *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        required
+                        placeholder="City (e.g. Amravati)"
+                        value={onboardingData.city}
+                        onChange={(e) => setOnboardingData({ ...onboardingData, city: e.target.value })}
+                        className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="State (e.g. Maharashtra)"
+                        value={onboardingData.state || ''}
+                        onChange={(e) => setOnboardingData({ ...onboardingData, state: e.target.value })}
+                        className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Street Address *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Shop 12, Commercial Hub, Main Ring Road"
+                      value={onboardingData.address}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, address: e.target.value })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Contact Phone Number *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="+91 98220 12345"
+                      value={onboardingData.phone}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, phone: e.target.value })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Billing / Support Email
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="contact@restaurant.com"
+                      value={onboardingData.email || ''}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, email: e.target.value })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Client Merchant UPI ID (for QR Code Payments) ⚡
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. restaurantname@okaxis or 9822012345@paytm"
+                      value={onboardingData.merchantUpiId || ''}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, merchantUpiId: e.target.value })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-amber-300 placeholder-neutral-500 font-mono focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-[10px] text-neutral-400 mt-1 block">
+                      Customers will pay directly to this bank VPA when scanning bill QR codes.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      GSTIN &amp; FSSAI License
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="GSTIN (optional)"
+                        value={onboardingData.gstin || ''}
+                        onChange={(e) => setOnboardingData({ ...onboardingData, gstin: e.target.value })}
+                        className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 font-mono text-[11px] focus:outline-none focus:border-amber-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="FSSAI (optional)"
+                        value={onboardingData.fssaiNumber || ''}
+                        onChange={(e) => setOnboardingData({ ...onboardingData, fssaiNumber: e.target.value })}
+                        className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white placeholder-neutral-500 font-mono text-[11px] focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Number of Floor Tables (1 to 50)
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        required
+                        value={onboardingData.tableCount}
+                        onChange={(e) => setOnboardingData({ ...onboardingData, tableCount: parseInt(e.target.value) || 1 })}
+                        className="w-24 px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-white font-mono text-center focus:outline-none focus:border-amber-500"
+                      />
+                      <span className="text-[11px] text-neutral-400">
+                        Generates Table 1 to Table {onboardingData.tableCount} across dining sections
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-neutral-300 font-semibold block mb-1">
+                      Till Opening Cash Float ({onboardingData.currencySymbol || '₹'})
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={onboardingData.openingFloat}
+                      onChange={(e) => setOnboardingData({ ...onboardingData, openingFloat: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-750 rounded-xl text-emerald-400 font-mono font-bold focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Menu Preset Chooser */}
+                <div className="space-y-2 pt-2 border-t border-neutral-800">
+                  <label className="text-neutral-300 font-semibold block">
+                    Starter Menu Package for Client
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {[
+                      {
+                        id: 'cafe_fastfood',
+                        title: 'Cafe, Burgers, Pizza & Shakes',
+                        badge: '12 Items',
+                        desc: 'Gourmet burgers, French fries, thin-crust pizzas, cold coffee, espresso & brownies.',
+                      },
+                      {
+                        id: 'amravati',
+                        title: 'Authentic Indian / Regional Cuisine',
+                        badge: '32 Items',
+                        desc: 'Varhadi & Saoji specialties, Tandoor, Curries, Thalis, Sweets, and Coolers.',
+                      },
+                      {
+                        id: 'clean',
+                        title: 'Clean Minimal Starter',
+                        badge: '2 Starter Items',
+                        desc: 'Blank template ready for the client to add their own custom items or upload JSON.',
+                      },
+                      {
+                        id: 'keep',
+                        title: 'Keep Currently Loaded Menu',
+                        badge: `${menu.length} Items`,
+                        desc: 'Preserves whatever menu is currently configured in the POS memory.',
+                      },
+                    ].map(preset => {
+                      const isSelected = onboardingData.menuPreset === preset.id;
+                      return (
+                        <div
+                          key={preset.id}
+                          onClick={() => setOnboardingData({ ...onboardingData, menuPreset: preset.id as any })}
+                          className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-amber-500/15 border-amber-500 shadow-md'
+                              : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`font-bold ${isSelected ? 'text-amber-400' : 'text-neutral-200'}`}>
+                              {preset.title}
+                            </span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
+                              {preset.badge}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-neutral-400 leading-snug">{preset.desc}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-bold rounded-xl shadow-lg transition cursor-pointer text-xs"
+                  >
+                    <Rocket className="w-4 h-4" />
+                    <span>Complete Onboarding &amp; Initialize Client Database</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* 2. Wipe Test Orders / Go Live Button */}
+              <div className="p-4 sm:p-5 bg-neutral-950 rounded-2xl border border-red-500/30 space-y-3.5">
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-red-500/20 flex items-center justify-center text-red-400">
+                      <Trash2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-white text-sm">2. Live Production Launch Reset (Wipe Test Orders)</h4>
+                      <p className="text-[11px] text-neutral-400">Wipe demo orders after staff training without touching custom menu or settings</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] uppercase font-bold text-red-400 px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20">
+                    Day 1 Go-Live
+                  </span>
+                </div>
+
+                <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20 text-neutral-300 text-[11px] leading-relaxed">
+                  <strong>What this does:</strong> Clears all {orders.length} order tickets, test invoices, void logs, and customer cart. Frees all {tables.length} tables to &quot;available&quot; and resets the active cash register shift. <strong>Preserves:</strong> Current restaurant brand profile, tax configuration, dishes, and staff PINs.
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
+                    <input
+                      type="password"
+                      maxLength={4}
+                      placeholder="Admin PIN (9999)"
+                      value={wipeSafetyPin}
+                      onChange={(e) => setWipeSafetyPin(e.target.value)}
+                      className="w-36 px-3 py-1.5 bg-neutral-900 border border-neutral-750 rounded-lg text-white font-mono text-center text-xs placeholder-neutral-500 focus:outline-none focus:border-red-500"
+                    />
+                    <span className="text-[10px] text-neutral-500">Security PIN required</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleWipeTestData}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition cursor-pointer text-xs shadow-md shadow-red-950/40"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Wipe All Test Orders &amp; Go Live</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Restore Demo Benchmark Dataset */}
+              <div className="p-4 bg-neutral-950 rounded-2xl border border-neutral-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                    <span>3. Sales Pitch Demo Mode: Restore Showcase Dataset</span>
+                  </h4>
+                  <p className="text-[11px] text-neutral-400">
+                    Restores active KDS tickets, occupied tables, and Vidarbha Saoji menu for prospective client demonstrations.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRestoreDemo}
+                  className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-semibold rounded-xl text-xs transition cursor-pointer shrink-0"
+                >
+                  Restore Demo Dataset
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -839,10 +1312,10 @@ export const RestaurantSettingsModal: React.FC<RestaurantSettingsModalProps> = (
               onClick={onClose}
               className="px-4 py-2 text-xs text-neutral-400 hover:text-white"
             >
-              Cancel
+              Close
             </button>
 
-            {activeTab !== 'firebase' && activeTab !== 'menu' && (
+            {activeTab !== 'firebase' && activeTab !== 'menu' && activeTab !== 'onboarding' && (
               <button
                 type="submit"
                 form={activeTab === 'business' ? 'business-form' : 'tax-form'}

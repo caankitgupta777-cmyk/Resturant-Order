@@ -19,9 +19,12 @@ import {
   RestaurantTenant,
   ThermalPrinterConfig,
   SubscriptionLicense,
+  ClientOnboardingOptions,
 } from '../types/restaurant';
 import {
   AMRAVATI_MENU,
+  CAFE_FASTFOOD_MENU,
+  CLEAN_STARTER_MENU,
   INITIAL_INVENTORY,
   INITIAL_TABLES,
   INITIAL_SAMPLE_ORDERS,
@@ -108,6 +111,11 @@ interface RestaurantContextType {
   menu: MenuItem[];
   updateWholeMenu: (newMenu: MenuItem[]) => { success: boolean; count: number; error?: string };
   resetMenuToDefault: () => void;
+
+  // Client Onboarding & Database Reset / Production Launch
+  resetDatabaseForNewClient: (options: ClientOnboardingOptions) => void;
+  wipeTestDataOnly: (openingFloat?: number) => void;
+  resetToDemoData: () => void;
   inventory: InventoryItem[];
   tables: RestaurantTable[];
   orders: Order[];
@@ -898,6 +906,252 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     addNotification('Menu Restored', 'Reset to authentic Amravati Varhad Rasoi default menu.', 'kitchen');
   }, [addAuditLog, addNotification]);
 
+  // ==========================================
+  // CLIENT ONBOARDING & DATABASE RESET WIZARD
+  // ==========================================
+  const resetDatabaseForNewClient = useCallback((options: ClientOnboardingOptions) => {
+    // 1. Generate clean tables according to tableCount
+    const count = Math.max(1, Math.min(60, Number(options.tableCount) || 10));
+    const sections: ('AC Dining Hall' | 'Royal Courtyard' | 'Rooftop Lounge' | 'Family Cabana')[] = [
+      'AC Dining Hall', 'Royal Courtyard', 'Rooftop Lounge', 'Family Cabana'
+    ];
+    const newTables: RestaurantTable[] = Array.from({ length: count }, (_, i) => {
+      const num = i + 1;
+      const section = sections[Math.floor((i / count) * sections.length)] || 'AC Dining Hall';
+      return {
+        id: `tbl-${num}`,
+        number: num,
+        section,
+        capacity: num % 3 === 0 ? 6 : num % 2 === 0 ? 4 : 2,
+        status: 'available',
+      };
+    });
+
+    // 2. Select initial menu preset
+    let chosenMenu = menu;
+    if (options.menuPreset === 'amravati') {
+      chosenMenu = AMRAVATI_MENU;
+    } else if (options.menuPreset === 'cafe_fastfood') {
+      chosenMenu = CAFE_FASTFOOD_MENU;
+    } else if (options.menuPreset === 'clean') {
+      chosenMenu = CLEAN_STARTER_MENU;
+    }
+
+    // 3. New Restaurant Business & Tax Settings
+    const cleanSlug = options.restaurantName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 18);
+    const generatedTenantId = `rest-${cleanSlug}-${Date.now().toString().slice(-4)}`;
+    const newSettings: RestaurantSettings = {
+      restaurantName: options.restaurantName.trim(),
+      tagline: options.tagline?.trim() || 'Fine Dining & Quick Service Restaurant',
+      address: options.address.trim(),
+      city: options.city.trim(),
+      state: options.state?.trim() || `${options.city.trim()} Region`,
+      phone: options.phone.trim(),
+      email: options.email?.trim() || 'billing@restaurant.com',
+      gstin: options.gstin?.trim() || '27XXXXX0000X1Z1',
+      fssaiNumber: options.fssaiNumber?.trim() || '10000000000000',
+      cgstRate: options.cgstRate !== undefined ? Number(options.cgstRate) : 2.5,
+      sgstRate: options.sgstRate !== undefined ? Number(options.sgstRate) : 2.5,
+      serviceChargeRate: options.serviceChargeRate !== undefined ? Number(options.serviceChargeRate) : 0,
+      currencySymbol: options.currencySymbol || '₹',
+      merchantUpiId: options.merchantUpiId?.trim() || `${options.restaurantName.toLowerCase().replace(/[^a-z0-9]/g, '')}@okaxis`,
+      tenantId: generatedTenantId,
+    };
+
+    // 4. Create new Tenant workspace
+    const newTenant: RestaurantTenant = {
+      tenantId: generatedTenantId,
+      name: newSettings.restaurantName,
+      city: newSettings.city,
+      address: newSettings.address,
+      phone: newSettings.phone,
+      email: newSettings.email,
+      gstin: newSettings.gstin,
+      fssaiNumber: newSettings.fssaiNumber,
+      currencySymbol: newSettings.currencySymbol,
+      createdAt: new Date().toISOString(),
+      isDefault: true,
+    };
+
+    // 5. Open fresh cash register shift
+    const openingFloat = Number(options.openingFloat) || 1000;
+    const newShift: RegisterShift = {
+      id: `shift-${Date.now()}`,
+      openedAt: new Date().toISOString(),
+      openedBy: currentStaff.name,
+      openingFloat,
+      cashSales: 0,
+      upiSales: 0,
+      cardSales: 0,
+      totalSales: 0,
+      expectedCash: openingFloat,
+      status: 'open',
+      notes: `Client onboarded: ${newSettings.restaurantName} initialized with ${newSettings.currencySymbol}${openingFloat} opening cash float.`,
+    };
+
+    // 6. Fresh initialization audit log
+    const newAudit: AuditLog[] = [
+      {
+        id: `audit-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        staffName: currentStaff.name,
+        staffRole: currentStaff.role,
+        action: 'DRAWER_OPEN',
+        details: `Client Onboarding Complete: ${newSettings.restaurantName} configured with ${count} tables. Till initialized with ${newSettings.currencySymbol}${openingFloat}.`,
+        amount: openingFloat,
+      }
+    ];
+
+    // Update in-memory state
+    setRestaurantSettings(newSettings);
+    setCurrentTenant(newTenant);
+    setTenantsList(prev => [newTenant, ...prev.filter(t => t.tenantId !== generatedTenantId)]);
+    setTables(newTables);
+    setMenu(chosenMenu);
+    setOrders([]);
+    setBookings([]);
+    setWaiterCalls([]);
+    setCart([]);
+    setActiveShift(newShift);
+    setShiftHistory([]);
+    setAuditLogs(newAudit);
+
+    // Persist to LocalStorage
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(newSettings));
+      localStorage.setItem(STORAGE_KEY_TABLES, JSON.stringify(newTables));
+      localStorage.setItem(STORAGE_KEY_MENU, JSON.stringify(chosenMenu));
+      localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_BOOKINGS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_SHIFT, JSON.stringify(newShift));
+      localStorage.setItem(STORAGE_KEY_SHIFT_HIST, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_AUDIT, JSON.stringify(newAudit));
+      localStorage.setItem(STORAGE_KEY_TENANTS, JSON.stringify([newTenant, ...tenantsList.filter(t => t.tenantId !== generatedTenantId)]));
+    } catch {}
+
+    soundEffects.playKitchenBell();
+    addNotification('Client Onboarding Complete', `${newSettings.restaurantName} is now ready for live billing!`, 'order');
+  }, [currentStaff, menu, tenantsList, addNotification]);
+
+  const wipeTestDataOnly = useCallback((openingFloatVal: number = 2000) => {
+    const float = Number(openingFloatVal) || 2000;
+    // Keep settings, menu, inventory, staff
+    // Free all tables
+    const clearedTables: RestaurantTable[] = tables.map(t => ({
+      ...t,
+      status: 'available',
+      currentOrderId: undefined,
+      currentGuestName: undefined,
+      waiterAssigned: undefined,
+      reservationTime: undefined,
+    }));
+
+    const newShift: RegisterShift = {
+      id: `shift-${Date.now()}`,
+      openedAt: new Date().toISOString(),
+      openedBy: currentStaff.name,
+      openingFloat: float,
+      cashSales: 0,
+      upiSales: 0,
+      cardSales: 0,
+      totalSales: 0,
+      expectedCash: float,
+      status: 'open',
+      notes: 'Fresh shift started after live production launch reset. All test orders wiped.',
+    };
+
+    const newAudit: AuditLog[] = [
+      {
+        id: `audit-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        staffName: currentStaff.name,
+        staffRole: currentStaff.role,
+        action: 'DRAWER_OPEN',
+        details: `Live Production Launch Reset: Cleared all test orders & invoices. Reset ${clearedTables.length} tables to available. Shift opened with ₹${float}.`,
+        amount: float,
+      }
+    ];
+
+    setOrders([]);
+    setBookings([]);
+    setWaiterCalls([]);
+    setCart([]);
+    setTables(clearedTables);
+    setActiveShift(newShift);
+    setShiftHistory([]);
+    setAuditLogs(newAudit);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_BOOKINGS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_TABLES, JSON.stringify(clearedTables));
+      localStorage.setItem(STORAGE_KEY_SHIFT, JSON.stringify(newShift));
+      localStorage.setItem(STORAGE_KEY_SHIFT_HIST, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_AUDIT, JSON.stringify(newAudit));
+    } catch {}
+
+    soundEffects.playKitchenBell();
+    addNotification('Production Reset Complete', 'All test orders cleared. System is 100% clean for live customer billing.', 'kitchen');
+  }, [tables, currentStaff, addNotification]);
+
+  const resetToDemoData = useCallback(() => {
+    setRestaurantSettings(DEFAULT_RESTAURANT_SETTINGS);
+    setCurrentTenant(INITIAL_TENANTS[0]);
+    setTenantsList(INITIAL_TENANTS);
+    setTables(INITIAL_TABLES);
+    setMenu(AMRAVATI_MENU);
+    setInventory(INITIAL_INVENTORY);
+    setOrders(INITIAL_SAMPLE_ORDERS as Order[]);
+    setActiveShift(INITIAL_REGISTER_SHIFT);
+    setShiftHistory([]);
+    setCart([]);
+    setWaiterCalls([]);
+    setBookings([
+      {
+        id: 'bkg-1',
+        bookingRef: 'BKG-AMR-782',
+        customerName: 'Patil Reunion',
+        customerEmail: 'patil.amr@example.com',
+        customerPhone: '+91 98220 12345',
+        guests: 6,
+        date: new Date().toISOString().split('T')[0],
+        timeSlot: '19:30',
+        tableId: 'tbl-6',
+        tableNumber: 6,
+        section: 'Royal Courtyard',
+        status: 'confirmed',
+        createdAt: new Date(Date.now() - 3600000).toISOString(),
+      }
+    ]);
+    const initAudit: AuditLog[] = [
+      {
+        id: 'audit-init-1',
+        timestamp: new Date().toISOString(),
+        staffName: 'Manager Ankit (Admin/Owner)',
+        staffRole: 'admin',
+        action: 'DRAWER_OPEN',
+        details: 'POS system restored to Amravati demo benchmark dataset with sample orders.',
+        amount: 2000,
+      }
+    ];
+    setAuditLogs(initAudit);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(DEFAULT_RESTAURANT_SETTINGS));
+      localStorage.setItem(STORAGE_KEY_TENANTS, JSON.stringify(INITIAL_TENANTS));
+      localStorage.setItem(STORAGE_KEY_TABLES, JSON.stringify(INITIAL_TABLES));
+      localStorage.removeItem(STORAGE_KEY_MENU);
+      localStorage.setItem(STORAGE_KEY_INVENTORY, JSON.stringify(INITIAL_INVENTORY));
+      localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(INITIAL_SAMPLE_ORDERS));
+      localStorage.setItem(STORAGE_KEY_SHIFT, JSON.stringify(INITIAL_REGISTER_SHIFT));
+      localStorage.setItem(STORAGE_KEY_SHIFT_HIST, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_AUDIT, JSON.stringify(initAudit));
+    } catch {}
+
+    soundEffects.playKitchenBell();
+    addNotification('Demo Data Restored', 'Reset to Varhad Rasoi Amravati demo dataset.', 'table');
+  }, [addNotification]);
+
   // Push Permission
   const requestPushPermission = async () => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -1408,6 +1662,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         menu,
         updateWholeMenu,
         resetMenuToDefault,
+        resetDatabaseForNewClient,
+        wipeTestDataOnly,
+        resetToDemoData,
         inventory,
         tables,
         orders,

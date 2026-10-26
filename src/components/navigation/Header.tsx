@@ -23,6 +23,7 @@ import {
   Building2,
   Printer,
   Zap,
+  Sparkles,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -33,6 +34,7 @@ interface HeaderProps {
   onOpenTenants: () => void;
   onOpenPrinter: () => void;
   onOpenSubscription: () => void;
+  onOpenOnboarding?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTenants,
   onOpenPrinter,
   onOpenSubscription,
+  onOpenOnboarding,
 }) => {
   const {
     currentView,
@@ -213,16 +216,26 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Settings Trigger */}
-          {currentStaff.role === 'admin' && (
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-1.5 rounded-lg bg-neutral-800/80 border border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-750 transition cursor-pointer"
-              title="POS Settings & Single File Menu Attachment"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-1.5 rounded-lg bg-neutral-800/80 border border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-750 transition cursor-pointer"
+            title="POS Settings & Single File Menu Attachment"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+
+          {/* Client Onboarding / Database Reset Button - Always Prominent */}
+          <button
+            type="button"
+            onClick={onOpenOnboarding || (() => setIsSettingsOpen(true))}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 transition cursor-pointer shadow-md shadow-amber-900/40 shrink-0"
+            title="Client Onboarding & Database Reset Wizard (Configure restaurant or reset database)"
+          >
+            <Sparkles className="w-3.5 h-3.5 fill-neutral-950" />
+            <span className="hidden sm:inline font-extrabold">Onboard / Reset DB</span>
+            <span className="sm:hidden font-extrabold">Onboard</span>
+          </button>
 
           {/* Notifications Bell */}
           <div className="relative">
@@ -328,9 +341,21 @@ export const Header: React.FC<HeaderProps> = ({
             })}
           </div>
 
-          <div className="hidden lg:flex items-center gap-2 text-[11px] text-neutral-400 pr-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Terminal Role: <strong className="text-amber-400 capitalize">{currentStaff.name} ({currentStaff.role})</strong></span>
+          <div className="flex items-center gap-2 text-[11px] text-neutral-400 pr-1 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenOnboarding || (() => setIsSettingsOpen(true))}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 transition cursor-pointer shadow-sm"
+              title="Quickly onboard a new client restaurant or reset database"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Client Onboard &amp; Reset Wizard</span>
+            </button>
+            <span className="hidden xl:inline text-neutral-600">&bull;</span>
+            <div className="hidden xl:flex items-center gap-1.5 text-neutral-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span><strong className="text-amber-400 capitalize">{currentStaff.name} ({currentStaff.role})</strong></span>
+            </div>
           </div>
         </div>
       </div>

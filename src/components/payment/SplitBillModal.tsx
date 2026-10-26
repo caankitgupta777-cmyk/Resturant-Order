@@ -251,7 +251,7 @@ export const BillPaymentModal: React.FC<BillPaymentModalProps> = ({ orderId, onC
                       Scan UPI QR Code to Pay {restaurantSettings.currencySymbol}{order.totalAmount}
                     </span>
                     <p className="text-[11px] text-neutral-400 leading-relaxed">
-                      UPI ID: <span className="font-mono text-amber-400 font-semibold">{restaurantSettings.restaurantName.toLowerCase().replace(/\s+/g, '')}@icici</span>
+                      UPI ID: <span className="font-mono text-amber-400 font-semibold">{restaurantSettings.merchantUpiId || `${restaurantSettings.restaurantName.toLowerCase().replace(/\s+/g, '')}@icici`}</span>
                     </p>
                     <p className="text-[10px] text-neutral-400">
                       Supports PhonePe, Google Pay, Paytm, BHIM, CRED, and mobile banking apps.

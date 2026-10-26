@@ -18,6 +18,7 @@ import { AuditLogViewerModal } from './components/audit/AuditLogViewerModal';
 import { TenantOnboardingModal } from './components/tenant/TenantOnboardingModal';
 import { ThermalPrinterModal } from './components/hardware/ThermalPrinterModal';
 import { SubscriptionLicenseModal } from './components/saas/SubscriptionLicenseModal';
+import { Sparkles } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
   const {
@@ -40,6 +41,7 @@ const MainAppContent: React.FC = () => {
   const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'business' | 'tax' | 'firebase' | 'menu' | 'onboarding'>('business');
   const [voidOrderId, setVoidOrderId] = useState<string | null>(null);
 
   return (
@@ -56,6 +58,10 @@ const MainAppContent: React.FC = () => {
         onOpenTenants={() => setIsTenantModalOpen(true)}
         onOpenPrinter={() => setIsPrinterModalOpen(true)}
         onOpenSubscription={() => setIsSubscriptionModalOpen(true)}
+        onOpenOnboarding={() => {
+          setSettingsTab('onboarding');
+          setIsSettingsOpen(true);
+        }}
       />
 
       {/* Main Content Viewport */}
@@ -118,6 +124,7 @@ const MainAppContent: React.FC = () => {
       {/* Configurable Restaurant & Firebase Multi-Device Sync Modal */}
       <RestaurantSettingsModal
         isOpen={isSettingsOpen}
+        initialTab={settingsTab}
         onClose={() => setIsSettingsOpen(false)}
       />
 
@@ -151,6 +158,10 @@ const MainAppContent: React.FC = () => {
       <TenantOnboardingModal
         isOpen={isTenantModalOpen}
         onClose={() => setIsTenantModalOpen(false)}
+        onOpenClientWizard={() => {
+          setSettingsTab('onboarding');
+          setIsSettingsOpen(true);
+        }}
       />
 
       {/* Phase 5: Hardware & Thermal Printer Modal */}
@@ -164,6 +175,22 @@ const MainAppContent: React.FC = () => {
         isOpen={isSubscriptionModalOpen}
         onClose={() => setIsSubscriptionModalOpen(false)}
       />
+
+      {/* Floating Action Button for Client Onboarding & DB Reset */}
+      <div className="fixed bottom-5 right-5 z-40 no-print">
+        <button
+          type="button"
+          onClick={() => {
+            setSettingsTab('onboarding');
+            setIsSettingsOpen(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-extrabold text-xs sm:text-sm rounded-full shadow-2xl border-2 border-amber-300 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          title="Open Client Onboarding & Database Reset Wizard"
+        >
+          <Sparkles className="w-4 h-4 fill-neutral-950" />
+          <span>🚀 Onboard / Reset DB</span>
+        </button>
+      </div>
 
       {/* Footer Branding */}
       <footer className="border-t border-neutral-900 bg-neutral-950/90 py-5 text-center text-xs text-neutral-500 no-print">

@@ -241,6 +241,27 @@ export interface RestaurantSettings {
   serviceChargeRate: number;
   currencySymbol: string;
   tenantId?: string;
+  merchantUpiId?: string;
+}
+
+export interface ClientOnboardingOptions {
+  restaurantName: string;
+  tagline?: string;
+  address: string;
+  city: string;
+  state?: string;
+  phone: string;
+  email?: string;
+  gstin?: string;
+  fssaiNumber?: string;
+  merchantUpiId?: string;
+  currencySymbol?: string;
+  cgstRate?: number;
+  sgstRate?: number;
+  serviceChargeRate?: number;
+  tableCount: number;
+  openingFloat: number;
+  menuPreset: 'keep' | 'clean' | 'amravati' | 'cafe_fastfood';
 }
 
 export interface FirebaseConfigData {
